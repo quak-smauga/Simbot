@@ -4,7 +4,7 @@
 
 W kodzie projekt nazywa się **qwe** (`@qwe/*`, CLI `qwe`, zmienne `QWE_*`).
 
-📖 **Dokumentacja:** portal w [`apps/docs`](apps/docs) — architektura, API, eventy, capability, konfiguracja. Lokalnie: `pnpm docs` → http://localhost:4321.
+📖 **Dokumentacja: https://quak-smauga.github.io/Simbot/** — architektura, API, eventy, capability, konfiguracja. Źródło w [`apps/docs`](apps/docs), lokalnie: `pnpm docs` → http://localhost:4321.
 
 ## Start
 
