@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+#
+# WYGENEROWANE PRZEZ `qwe build` — nie edytuj. Powstaje z AgentManifest.yaml + capability.yaml pluginów.
+#
+# Kolejność warstw to cały sens: pakiety systemowe zmieniają się rzadko, npm czasem, pluginy i skille ciągle.
+# Edycja promptu w skills/ przebudowuje jedną małą warstwę, nie Chromium.
+
+FROM {{RUNTIME_IMAGE}}
+
+# --- pakiety systemowe (unia `system:` z capability) ------------------------
+{{#IF_APT}}
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends {{APT_PACKAGES}} \
+ && rm -rf /var/lib/apt/lists/*
+USER node
+{{/IF_APT}}
+
+# --- zależności capability (unia `npm:` z pluginów agenta) -------------------
+# Instalowane do /agent/workspace/node_modules — ESM w pluginach (/agent/workspace/plugins/*/index.js)
+# rozwiązuje importy w górę drzewa, więc trafia tu bez NODE_PATH. Pluginy wbudowane mają swoje depsy w runtime.
+COPY --chown=node:node .qwe/build/capability-deps/package.json /agent/workspace/package.json
+RUN cd /agent/workspace && npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+
+# --- materiał agenta ---------------------------------------------------------
+COPY --chown=node:node AgentManifest.yaml /agent/workspace/
+{{#IF_PERSONA}}COPY --chown=node:node {{PERSONA}} /agent/workspace/{{PERSONA}}{{/IF_PERSONA}}
+{{#IF_PLUGINS}}COPY --chown=node:node {{PLUGINS}}/ /agent/workspace/{{PLUGINS}}/{{/IF_PLUGINS}}
+{{#IF_SKILLS}}COPY --chown=node:node {{SKILLS}}/ /agent/workspace/{{SKILLS}}/{{/IF_SKILLS}}
+
+# --- tożsamość ---------------------------------------------------------------
+# buildHash: content-addressed po manifeście + pluginach + depsach. QWE_INSTANCE_ID daje `qwe run` i on NIE zmienia się po rebuildzie.
+ENV QWE_AGENT_NAME="{{NAME}}" \
+    QWE_AGENT_VERSION="{{VERSION}}" \
+    QWE_BUILD_HASH="{{BUILD_HASH}}"
+
+LABEL org.qwe.agent.name="{{NAME}}" \
+      org.qwe.agent.version="{{VERSION}}" \
+      org.qwe.build.hash="{{BUILD_HASH}}"

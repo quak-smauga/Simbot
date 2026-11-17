@@ -1,0 +1,12 @@
+apiVersion: qwe/v1
+kind: Capability
+name: pantry
+version: 0.1.0
+description: Spiżarnia — co jest w domu.
+dependencies:
+  npm: []
+  system: []
+tools:
+  - name: pantry.list
+    usage: "<pantry.list>kategoria albo puste</pantry.list> — lista produktów w spiżarni"
+    notes: "Nie zgaduj, co jest w domu — sprawdź."

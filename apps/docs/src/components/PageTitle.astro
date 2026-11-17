@@ -1,0 +1,91 @@
+---
+// Nadpisanie Starlight PageTitle: tytuł + (opcjonalnie) status implementacji i pliki źródłowe z frontmattera.
+//   status:  implemented | partial | experimental | planned | deprecated
+//   sources: ["apps/chat/src/session.ts", …]   — ścieżki względem korzenia repo
+// Do 3 plików: chipy w linii; więcej: rozwijane „Źródła · N”.
+import Default from "@astrojs/starlight/components/PageTitle.astro";
+import Status from "./Status.astro";
+
+const { status, sources = [], template } = Astro.locals.starlightRoute.entry.data as { status?: string; sources?: string[]; template?: string };
+const repo = (import.meta.env.SIMBOT_REPO_URL as string | undefined)?.replace(/\/$/, "");
+// splash (strona główna) ma własny nagłówek w Hero.astro
+const splash = template === "splash";
+const folded = sources.length > 3;
+---
+
+{!splash && <Default />}
+{
+  !splash && (status || sources.length > 0) && (
+    <div class="sb-meta">
+      {status && <Status value={status} />}
+      {!folded && sources.map((s) => (repo ? <a class="sb-src" href={`${repo}/${s}`}>{s}</a> : <span class="sb-src">{s}</span>))}
+      {folded && (
+        <details class="sb-sources">
+          <summary>Źródła · {sources.length} plików</summary>
+          <div class="sb-sources__list">
+            {sources.map((s) => (repo ? <a class="sb-src" href={`${repo}/${s}`}>{s}</a> : <span class="sb-src">{s}</span>))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+<style>
+  .sb-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    margin-top: 0.75rem;
+  }
+  .sb-src {
+    font-family: var(--__sl-font-mono);
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--sl-color-hairline);
+    color: var(--sl-color-gray-2);
+    background: var(--sl-color-bg-nav);
+    text-decoration: none;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  a.sb-src:hover {
+    color: var(--sl-color-white);
+    border-color: var(--sl-color-gray-4);
+  }
+  .sb-sources {
+    font-size: 0.75rem;
+    color: var(--sl-color-gray-3);
+  }
+  .sb-sources summary {
+    cursor: pointer;
+    padding: 0.15rem 0.5rem;
+    border-radius: 6px;
+    border: 1px dashed var(--sl-color-hairline-light);
+    list-style: none;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.72rem;
+  }
+  .sb-sources summary::-webkit-details-marker {
+    display: none;
+  }
+  .sb-sources summary::before {
+    content: "▸ ";
+  }
+  .sb-sources[open] summary::before {
+    content: "▾ ";
+  }
+  .sb-sources summary:hover {
+    color: var(--sl-color-white);
+  }
+  .sb-sources__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+</style>

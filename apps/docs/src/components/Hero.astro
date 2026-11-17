@@ -1,0 +1,192 @@
+---
+// Hero strony głównej. Logo = koło z oczami z aplikacji (apps/chat/public/ui/logo.js), mruga.
+import { Image } from "astro:assets";
+import shot from "../assets/simbot-app.png";
+---
+
+<section class="sb-hero">
+  <div class="sb-hero__logo" aria-hidden="true">
+    <svg viewBox="0 0 100 100">
+      <circle class="ring" cx="50" cy="50" r="40" fill="none" stroke-width="17"></circle>
+      <g class="eyes">
+        <circle cx="40" cy="50" r="5.2"></circle>
+        <circle cx="60" cy="50" r="5.2"></circle>
+      </g>
+    </svg>
+  </div>
+  <p class="sb-hero__eyebrow">Simbot · dokumentacja systemu</p>
+  <h1 id="_top" class="sb-hero__title">Simy, które rozmawiają,<br />szukają i biorą komputer.</h1>
+  <p class="sb-hero__lead">
+    Żywa mapa projektu: procesy, kontrakty, API, eventy i narzędzia — opisane na podstawie kodu,
+    ze statusem każdej części i ścieżką do pliku źródłowego.
+  </p>
+  <div class="sb-hero__actions">
+    <a class="sb-btn sb-btn--primary" href="/overview/quickstart/">Szybki start</a>
+    <a class="sb-btn" href="/architecture/system/">Architektura</a>
+    <a class="sb-btn sb-btn--ghost" href="/status/roadmap/">Co działa</a>
+  </div>
+  <pre class="sb-hero__cmd"><span>$</span> qwe dev --mock<em>   # chat na :3100, bez kluczy API</em></pre>
+  <figure class="sb-hero__shot">
+    <Image
+      src={shot}
+      alt="Simbot: rozmowa z simą, która wyszukuje na botland.pl; obok panel komputera ze zrzutem strony i krokami executora"
+      widths={[720, 1100, 1320]}
+      sizes="(max-width: 50rem) 100vw, 1100px"
+      loading="eager"
+    />
+    <figcaption>
+      Simbot z kluczami API do modeli: sima zleca <code>computer.run</code>, a panel obok pokazuje zrzuty i kroki. W trybie
+      <code>--mock</code> zobaczysz ten sam interfejs, tylko odpowiedzi są skryptowane.
+    </figcaption>
+  </figure>
+</section>
+
+<style>
+  .sb-hero {
+    position: relative;
+    padding: 2.5rem 0 1.5rem;
+    text-align: left;
+  }
+  .sb-hero::before {
+    content: "";
+    position: absolute;
+    inset: -4rem 0 auto;
+    height: 26rem;
+    background: radial-gradient(ellipse 60% 60% at 15% 20%, var(--sb-glow), transparent 70%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .sb-hero__logo svg {
+    width: 3.25rem;
+    height: 3.25rem;
+    display: block;
+  }
+  .sb-hero__logo .ring {
+    stroke: var(--sl-color-white);
+  }
+  .sb-hero__logo .eyes circle {
+    fill: var(--sl-color-white);
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: sb-blink 5.5s infinite;
+  }
+  @keyframes sb-blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    94% { transform: scaleY(0.1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sb-hero__logo .eyes circle { animation: none; }
+  }
+  .sb-hero__eyebrow {
+    margin-top: 1.5rem;
+    font-size: 0.75rem;
+    font-weight: 650;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+  }
+  :global(:root[data-theme="light"]) .sb-hero__eyebrow {
+    color: var(--sl-color-accent);
+  }
+  .sb-hero__title {
+    margin-top: 0.5rem !important;
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+    font-weight: 700;
+    color: var(--sl-color-white);
+  }
+  .sb-hero__lead {
+    max-width: 36rem;
+    font-size: 1.08rem;
+    color: var(--sl-color-gray-2);
+    margin-top: 1rem !important;
+  }
+  .sb-hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 1.6rem !important;
+  }
+  .sb-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 2.5rem;
+    padding: 0 1.05rem;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--sl-color-white);
+    background: var(--sb-surface-2);
+    border: 1px solid var(--sl-color-hairline-light);
+    transition: transform 0.15s, background 0.15s, border-color 0.15s;
+  }
+  .sb-btn:hover {
+    border-color: var(--sl-color-gray-4);
+    color: var(--sl-color-white);
+  }
+  .sb-btn:active {
+    transform: scale(0.98);
+  }
+  .sb-btn--primary {
+    background: var(--sl-color-white);
+    color: var(--sl-color-black);
+    border-color: transparent;
+  }
+  .sb-btn--primary:hover {
+    color: var(--sl-color-black);
+    opacity: 0.9;
+  }
+  .sb-btn--ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--sl-color-gray-2);
+  }
+  .sb-hero__cmd {
+    margin-top: 1.75rem !important;
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 0.6rem 0.9rem;
+    border-radius: 10px;
+    border: 1px solid var(--sl-color-hairline);
+    background: var(--sb-surface);
+    font-family: var(--__sl-font-mono);
+    font-size: 0.82rem;
+    color: var(--sl-color-gray-1);
+  }
+  .sb-hero__cmd span {
+    color: var(--sl-color-accent-high);
+    margin-right: 0.4rem;
+  }
+  .sb-hero__shot {
+    margin: 2rem 0 0 !important;
+  }
+  .sb-hero__shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 14px;
+    border: 1px solid var(--sl-color-hairline-light);
+    box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.02);
+  }
+  .sb-hero__shot figcaption {
+    margin-top: 0.75rem !important;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--sl-color-gray-3);
+    max-width: 40rem;
+  }
+  .sb-hero__shot figcaption code {
+    font-size: 0.85em;
+    padding: 0.05em 0.35em;
+    border-radius: 5px;
+    background: var(--sb-surface-2);
+    color: var(--sl-color-gray-2);
+  }
+  .sb-hero__cmd em {
+    font-style: normal;
+    color: var(--sl-color-gray-3);
+  }
+</style>

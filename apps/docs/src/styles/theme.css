@@ -1,0 +1,213 @@
+/* Simbot Docs — motyw. Ta sama zasada co w aplikacji (apps/chat/public/ui/app.css):
+   chrom = tusz na papierze, kolory QUAK tylko dla stanów i akcentu. Dark-first. */
+
+:root {
+  --sb-red: #e8453c;
+  --sb-green: #3bb273;
+  --sb-blue: #3a7bd5;
+  --sb-yellow: #f2c94c;
+  --sb-violet: #8b5cf6;
+  --sb-teal: #2bb5a6;
+  --sb-ok: var(--sb-green);
+  --sb-warn: #d9a531;
+  --sb-info: var(--sb-blue);
+
+  --sl-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+  --sl-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sl-content-width: 46rem;
+  --sl-sidebar-width: 17.5rem;
+  --sl-text-h1: 2.1rem;
+  --sl-text-h2: 1.45rem;
+  --sl-text-h3: 1.15rem;
+  --sl-line-height: 1.7;
+  --sb-radius: 12px;
+}
+
+/* ── dark (domyślny) ── */
+:root,
+::backdrop {
+  --sl-color-accent-low: #23193f;
+  --sl-color-accent: #8b5cf6;
+  --sl-color-accent-high: #c9b6ff;
+  --sl-color-white: #f1f1ec;
+  --sl-color-gray-1: #e2e2dc;
+  --sl-color-gray-2: #b7b7b0;
+  --sl-color-gray-3: #8a8a84;
+  --sl-color-gray-4: #5a5a55;
+  --sl-color-gray-5: #333431;
+  --sl-color-gray-6: #1e1f1d;
+  --sl-color-black: #0e0f0e;
+  --sl-color-bg-nav: #121312;
+  --sl-color-bg-sidebar: #0e0f0e;
+  --sl-color-hairline: #232422;
+  --sl-color-hairline-light: #2c2d2a;
+  --sb-surface: #151615;
+  --sb-surface-2: #1b1c1a;
+  --sb-glow: rgba(139, 92, 246, 0.16);
+}
+
+/* ── light ── */
+:root[data-theme="light"],
+[data-theme="light"] ::backdrop {
+  --sl-color-accent-low: #ece5ff;
+  --sl-color-accent: #6d3fe0;
+  --sl-color-accent-high: #3d1f99;
+  --sl-color-white: #1b1b1a;
+  --sl-color-gray-1: #2b2b29;
+  --sl-color-gray-2: #4a4a46;
+  --sl-color-gray-3: #6f6f6a;
+  --sl-color-gray-4: #a1a19b;
+  --sl-color-gray-5: #d9d9d3;
+  --sl-color-gray-6: #ededE8;
+  --sl-color-gray-7: #f5f5f2;
+  --sl-color-black: #fbfbf9;
+  --sl-color-bg-nav: #fbfbf9;
+  --sl-color-bg-sidebar: #f7f7f4;
+  --sl-color-hairline: #e8e8e4;
+  --sl-color-hairline-light: #efefea;
+  --sb-surface: #ffffff;
+  --sb-surface-2: #f4f4f0;
+  --sb-glow: rgba(109, 63, 224, 0.1);
+  --sb-warn: #b7861c;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── nagłówek i sidebar ── */
+header.header {
+  border-bottom: 1px solid var(--sl-color-hairline);
+  backdrop-filter: saturate(140%) blur(10px);
+}
+.site-title {
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
+  color: var(--sl-color-white) !important;
+}
+.site-title img {
+  height: 1.6rem !important;
+}
+nav.sidebar .top-level > li > details > summary .group-label > span,
+nav.sidebar .top-level > li > .large {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--sl-color-gray-3);
+}
+nav.sidebar a {
+  border-radius: 8px;
+  font-size: 0.875rem;
+  padding-block: 0.3rem;
+  transition: background 0.15s, color 0.15s;
+}
+nav.sidebar a[aria-current="page"],
+nav.sidebar a[aria-current="page"]:hover {
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+}
+:root[data-theme="light"] nav.sidebar a[aria-current="page"] {
+  color: var(--sl-color-accent);
+}
+nav.sidebar a:not([aria-current="page"]):hover {
+  background: var(--sb-surface-2);
+}
+
+/* ── treść ── */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+h1#_top {
+  letter-spacing: -0.02em;
+}
+.sl-markdown-content h2 {
+  padding-top: 0.6rem;
+}
+.sl-markdown-content a:not(.sb-card, .sb-node, .sb-src) {
+  text-decoration-color: color-mix(in srgb, var(--sl-color-accent) 45%, transparent);
+  text-underline-offset: 0.2em;
+}
+.sl-markdown-content :not(pre) > code {
+  font-size: 0.85em;
+  padding: 0.1em 0.38em;
+  border-radius: 6px;
+  background: var(--sb-surface-2);
+  border: 1px solid var(--sl-color-hairline);
+}
+.sl-markdown-content blockquote {
+  border-inline-start-color: var(--sl-color-accent);
+  color: var(--sl-color-gray-2);
+}
+
+/* tabele: karty z cienkimi liniami, czytelne na telefonie (przewijanie w poziomie w obrębie tabeli) */
+.sl-markdown-content table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: var(--sb-radius);
+  font-size: 0.86rem;
+  width: 100%;
+}
+.sl-markdown-content :is(th, td) {
+  border: 0;
+  border-bottom: 1px solid var(--sl-color-hairline);
+  padding: 0.55rem 0.8rem;
+  vertical-align: top;
+}
+.sl-markdown-content tr:last-child td {
+  border-bottom: 0;
+}
+.sl-markdown-content th {
+  background: var(--sb-surface-2);
+  font-weight: 600;
+  color: var(--sl-color-gray-1);
+  text-align: start;
+}
+
+/* mermaid: ramka jak karta */
+.sl-markdown-content pre.mermaid,
+.sl-markdown-content .mermaid {
+  background: var(--sb-surface);
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: var(--sb-radius);
+  padding: 1.25rem 0.75rem;
+  overflow-x: auto;
+  text-align: center;
+}
+
+/* plakietka statusu w treści .md (dla MDX: <Status value="…" />) */
+.sb-inline-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--sb-warn) 35%, transparent);
+  background: color-mix(in srgb, var(--sb-warn) 12%, transparent);
+  color: var(--sb-warn);
+}
+
+/* asides */
+.starlight-aside {
+  border-radius: var(--sb-radius);
+  border-inline-start-width: 3px;
+}
+
+/* karty Starlight */
+.card {
+  border-radius: var(--sb-radius) !important;
+  background: var(--sb-surface) !important;
+  border-color: var(--sl-color-hairline) !important;
+}
+
+/* splash (strona główna) bez domyślnego hero-paddingu */
+[data-has-hero] .content-panel:first-of-type {
+  border: 0;
+}

@@ -1,0 +1,46 @@
+---
+// Plakietka statusu implementacji. Używana w PageTitle (frontmatter `status`) i w MDX: <Status value="partial" />.
+interface Props {
+  value: string;
+  label?: string;
+}
+const LABELS: Record<string, string> = {
+  implemented: "Działa",
+  partial: "Częściowo",
+  experimental: "Eksperymentalne",
+  planned: "Planowane",
+  deprecated: "Wycofane",
+};
+const { value, label } = Astro.props;
+---
+
+<span class={`sb-status sb-status--${value}`}><i></i>{label ?? LABELS[value] ?? value}</span>
+
+<style>
+  .sb-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.15rem 0.55rem 0.15rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+    background: color-mix(in srgb, var(--c) 12%, transparent);
+    color: var(--c);
+    white-space: nowrap;
+    line-height: 1.4;
+  }
+  .sb-status i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--c);
+  }
+  .sb-status--implemented { --c: var(--sb-ok); }
+  .sb-status--partial { --c: var(--sb-warn); }
+  .sb-status--experimental { --c: var(--sb-violet); }
+  .sb-status--planned { --c: var(--sb-info); }
+  .sb-status--deprecated { --c: var(--sl-color-gray-3); }
+</style>

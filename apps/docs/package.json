@@ -1,0 +1,19 @@
+{
+  "name": "@qwe/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Simbot Docs — portal dokumentacji (Astro + Starlight). Treść: src/content/docs/**/*.md(x)",
+  "scripts": {
+    "dev": "astro dev --port 4321",
+    "docs:build": "astro build",
+    "preview": "astro preview --port 4321"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.40.0",
+    "astro": "6.4.8",
+    "astro-mermaid": "2.2.0",
+    "mermaid": "12.3.0",
+    "sharp": "^0.34.0"
+  }
+}

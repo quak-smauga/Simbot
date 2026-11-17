@@ -1,0 +1,40 @@
+/* DESKTOP — tylko w Electronie (html[data-shell="electron"], ustawia app.js, gdy preload dał window.qwe).
+   Okno: titleBarStyle hiddenInset (światła macOS na sidebarze), vibrancy „sidebar” prześwituje tylko przez boczny panel —
+   wątek i panel komputera zostają kryjące. Pas 52 px u góry = uchwyt do przeciągania okna. */
+html[data-shell="electron"] { --titlebar: 52px; }
+html[data-shell="electron"] body { background: transparent; }
+html[data-shell="electron"] .main, html[data-shell="electron"] .work { background: var(--bg); }
+
+/* sidebar: półprzezroczysty, pod spodem vibrancy; pierwszy rząd = światła okna + zwiń panel */
+@media (min-width: 960px) {
+  html[data-shell="electron"] .nav__in { background: color-mix(in srgb, var(--panel) 62%, transparent); border-right-color: color-mix(in srgb, var(--line) 70%, transparent); padding-top: var(--titlebar); position: relative; }
+  html[data-shell="electron"] .nav__head { -webkit-app-region: drag; }
+  html[data-shell="electron"] #navClose { position: absolute; top: 10px; right: 12px; }
+  html[data-shell="electron"] .nav__in::before { content: ""; position: absolute; inset: 0 0 auto 0; height: var(--titlebar); -webkit-app-region: drag; }
+  /* panel zamknięty: światła lądują na nagłówku wątku → miejsce na nie */
+  html[data-shell="electron"] body[data-nav="closed"] .head, html[data-shell="electron"] body[data-nav="closed"] .pagebar { padding-left: 86px; }
+}
+@media (max-width: 959px) {
+  html[data-shell="electron"] .head, html[data-shell="electron"] .pagebar { padding-left: 86px; }
+}
+
+/* nagłówek wątku, pasek strony i nagłówek komputera ciągną okno; przyciski i pola nie */
+html[data-shell="electron"] .head, html[data-shell="electron"] .pagebar, html[data-shell="electron"] .work__head { -webkit-app-region: drag; height: var(--titlebar); }
+html[data-shell="electron"] :is(button, input, textarea, select, a, .dd, .menu, .head__input, .head__av) { -webkit-app-region: no-drag; }
+
+/* przełącznik widgetu w nagłówku: pokaż / schowaj kropkę na pulpicie (okno główne zostaje) */
+.wtoggle { display: none; }
+html[data-shell="electron"] .wtoggle {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 10px; margin-right: 6px;
+  border-radius: 9px; border: 1px solid var(--line); color: var(--ink-2); font-size: 13px; font-weight: 500; line-height: 1;
+  transition: background 0.2s, color 0.2s;
+}
+html[data-shell="electron"] .wtoggle:hover { background: var(--soft); color: var(--ink); }
+.wtoggle .ic { display: block; }
+.wtoggle__t { display: block; }
+.wtoggle__sw { position: relative; width: 26px; height: 16px; border-radius: 16px; background: var(--soft-2); flex: none; transition: background 0.2s; }
+.wtoggle__sw i { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.22s var(--ease); }
+.wtoggle[aria-checked="true"] { color: var(--ink); }
+.wtoggle[aria-checked="true"] .wtoggle__sw { background: var(--q-green); }
+.wtoggle[aria-checked="true"] .wtoggle__sw i { transform: translateX(10px); background: #fff; }
+@media (max-width: 1100px) { html[data-shell="electron"] .wtoggle__t { display: none; } }

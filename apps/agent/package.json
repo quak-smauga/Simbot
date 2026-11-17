@@ -1,0 +1,26 @@
+{
+  "name": "@qwe/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "qwe agent server \u2014 capability registry z manifestu, taski (direct + plan), pause/resume/cancel, SSE event stream, screenshoty, dashboard",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx --conditions=development src/index.ts",
+    "start": "node --no-warnings=ExperimentalWarning dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@qwe/core": "workspace:*",
+    "@qwe/mcp": "workspace:*",
+    "@qwe/plugin-computer": "workspace:*",
+    "@qwe/plugin-web": "workspace:*",
+    "@qwe/plugin-skills": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

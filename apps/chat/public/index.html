@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111211" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>simbot</title>
+    <link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%231b1b1a' stroke-width='17'/%3E%3Ccircle cx='40' cy='50' r='5.2' fill='%231b1b1a'/%3E%3Ccircle cx='60' cy='50' r='5.2' fill='%231b1b1a'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/ui/app.css" />
+    <link rel="stylesheet" href="/ui/desktop.css" />
+  </head>
+  <body data-nav="open" data-work="closed">
+    <!-- ───────── sidebar: simy + rozmowy ───────── -->
+    <div class="backdrop" id="backdrop"></div>
+    <aside class="nav" id="nav">
+      <div class="nav__in">
+        <div class="nav__head">
+          <div class="brand" id="brand"><span id="brandLogo"></span><span class="word">simbot</span></div>
+          <span class="sp"></span>
+          <button class="ib" id="themeBtn" title="Motyw" data-icon="sun"></button>
+          <button class="ib" id="navClose" title="Schowaj panel" data-icon="panel-left-close"></button>
+        </div>
+        <div class="sims" id="sims"></div>
+        <button class="newbtn" id="newBtn"><span data-icon="plus"></span>Nowa rozmowa</button>
+        <div class="search" id="searchWrap" hidden><span data-icon="search" data-size="15"></span><input id="search" placeholder="Szukaj rozmowy…" /></div>
+        <nav class="convs" id="convs"></nav>
+        <div class="nav__empty" id="navEmpty" hidden></div>
+        <div class="me" id="me">
+          <div id="meAv" style="width:36px;height:36px;flex:none"></div>
+          <div style="flex:1;min-width:0"><div class="me__name" id="meName">—</div><div class="me__sub" id="meSub" data-agent="down"><i></i><span id="meSubText">agent śpi</span></div></div>
+          <button class="ib" id="meBtn" title="Menu" data-icon="ellipsis"></button>
+          <div class="menu" id="meMenu" hidden></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ───────── main ───────── -->
+    <main class="main" id="main">
+      <header class="head" id="head">
+        <button class="ib menuBtn" id="menuBtn" title="Pokaż panel" data-icon="panel-left-open"></button>
+        <div class="head__av" id="headAv"></div>
+        <div class="head__t">
+          <div class="head__name" id="titleWrap"><input class="head__input" id="titleInput" value="" placeholder="Nowa rozmowa" spellcheck="false" /><span class="sk sk--title" id="titleSk" hidden></span></div>
+          <div class="head__sub" id="headSub"></div>
+        </div>
+        <div class="head__btns">
+                    <button class="btn btn--primary btn--sm addsim" id="addSimBtn" hidden><span data-icon="user-plus" data-size="15"></span><span class="addsim__t">Dodaj sima</span></button>
+          <button class="wtoggle" id="widgetBtn" role="switch" aria-checked="false" title="Widget na pulpicie: pokaż / schowaj (⌘⇧W) · polecenie z dowolnego miejsca: ⌥Space"><span data-icon="picture-in-picture-2" data-size="15"></span><span class="wtoggle__t">Widget</span><span class="wtoggle__sw" aria-hidden="true"><i></i></span></button>
+          <button class="ib" id="ddBtn" title="Rozmowa: simy, workflow" data-icon="ellipsis-vertical"></button>
+        </div>
+        <div class="dd" id="dd" hidden></div>
+      </header>
+
+      <div class="pagebar" id="pagebar" hidden><button class="ib menuBtn" id="pageMenu" title="Pokaż panel" data-icon="panel-left-open"></button><button class="btn btn--ghost btn--sm" id="pageBack"><span data-icon="chevron-left" data-size="16"></span>wróć do rozmowy</button></div>
+      <section class="voice" id="voicePanel" hidden>
+        <canvas id="kropka"></canvas>
+        <div class="voice__top">
+          <button class="ib" id="voiceMin" title="Zmniejsz (F)" data-icon="minimize-2"></button>
+          <button class="ib" id="voiceMax" title="Pełny ekran (F)" data-icon="maximize-2"></button>
+          <span class="voice__state" id="voiceState"></span>
+        </div>
+        <div class="voice__bottom">
+          <span class="voice__hint" id="voiceHint"></span>
+          <button class="voice__stop" id="voiceStop" title="Zakończ rozmowę głosową (M)"><span data-icon="square" data-size="14"></span><span>zakończ</span></button>
+        </div>
+      </section>
+
+      <section class="timeline" id="timeline"><div class="tl" id="tl"></div></section>
+      <button class="jump" id="jumpBtn" hidden data-icon="arrow-down"></button>
+
+      <!-- strony zamiast wątku: sim, workflowy, pusto -->
+      <section class="page" id="page" hidden></section>
+
+      <footer class="composer" id="composer">
+        <div class="cbox" id="cbox">
+          <textarea id="input" rows="1" placeholder="Napisz… @ woła sima" enterkeyhint="send"></textarea>
+          <button class="ib" id="voiceBtn" title="Głos (M)" data-icon="mic"></button>
+          <button class="send" id="sendBtn" title="Wyślij (Enter)" data-icon="arrow-up" disabled></button>
+        </div>
+        <div class="cmeta"><span id="metaLeft"><code>@sim</code> zwraca się · <code>@sim.task</code> zleca · Shift+Enter nowa linia</span><span id="metaRight"></span></div>
+      </footer>
+    </main>
+
+    <!-- ───────── work: przeglądarka / komputer / szukanie obok (desktop) ───────── -->
+    <aside class="work" id="work">
+      <div class="work__in">
+        <div class="work__head"><span id="workTitle">zadanie</span><button class="ib" id="workClose" title="Zamknij" data-icon="x"></button></div>
+        <div class="work__body" id="workBody"></div>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast"><div id="toastAv"></div><div><b id="toastT"></b><p id="toastP"></p></div></div>
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>

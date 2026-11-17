@@ -1,0 +1,28 @@
+{
+  "name": "@qwe/core",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "qwe core — eventy, parser <nativeapi> (direct + plan), executor planu, kontrakt capability, manifest, LLM adapter",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --conditions=development src/selftest.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

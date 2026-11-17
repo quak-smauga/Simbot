@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>qwe agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <style>
+      :root { --ink:#0a0b0f; --slate:#14171f; --line:#232833; --pulse:#45e0c0; --amber:#f0b429; --rose:#ff6b7a; --blue:#6ea8ff; --dim:#6a7484; --text:#dde3ec;
+        --display:'Syne',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace; --rail:34px; }
+      * { box-sizing:border-box; }
+      body { margin:0; min-height:100vh; background:var(--ink); color:var(--text); font-family:var(--mono); font-size:13px; line-height:1.55; padding-left:var(--rail); }
+      /* ---- signature: the pulse rail --------------------------------- */
+      .rail { position:fixed; inset:0 auto 0 0; width:var(--rail); border-right:1px solid var(--line); background:linear-gradient(180deg,#0d0f15,var(--ink)); overflow:hidden; }
+      .rail__spine { position:absolute; top:0; bottom:0; left:50%; width:1px; background:var(--line); }
+      .tick { position:absolute; left:50%; width:15px; height:2px; transform:translateX(-50%); background:var(--pulse); opacity:.9; animation:fall 9s linear forwards; }
+      .tick--warn { background:var(--amber); width:21px; } .tick--bad { background:var(--rose); width:27px; } .tick--info { background:var(--blue); width:11px; }
+      @keyframes fall { from { top:-4px; opacity:1 } to { top:100%; opacity:.05 } }
+      /* ---- shell ------------------------------------------------------ */
+      .shell { max-width:1180px; margin:0 auto; padding:30px 26px 70px; }
+      .head { display:flex; align-items:baseline; justify-content:space-between; gap:20px; flex-wrap:wrap; padding-bottom:18px; border-bottom:1px solid var(--line); }
+      .head__name { margin:0; font-family:var(--display); font-weight:800; font-size:clamp(30px,5vw,46px); letter-spacing:-.03em; line-height:1; }
+      .head__meta { margin:9px 0 0; color:var(--dim); font-size:12px; letter-spacing:.02em; } .head__meta b { color:var(--text); font-weight:500; }
+      .lamp { display:inline-flex; align-items:center; gap:8px; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); }
+      .lamp::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--dim); }
+      .lamp[data-state=ready]::before { background:var(--pulse); box-shadow:0 0 11px var(--pulse); } .lamp[data-state=offline]::before { background:var(--rose); }
+      .vitals { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); border-bottom:1px solid var(--line); }
+      .vital { padding:17px 0; border-right:1px solid var(--line); } .vital:last-child { border-right:0; }
+      .vital__n { font-family:var(--display); font-weight:600; font-size:27px; letter-spacing:-.02em; } .vital__k { color:var(--dim); font-size:10px; letter-spacing:.18em; text-transform:uppercase; }
+      .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:26px; margin-top:26px; } @media (max-width:900px) { .grid { grid-template-columns:1fr; } }
+      .panel h2 { margin:0 0 12px; font-family:var(--display); font-weight:600; font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+      /* ---- events ----------------------------------------------------- */
+      .log { display:flex; flex-direction:column; gap:3px; max-height:70vh; overflow:auto; }
+      .ev { display:grid; grid-template-columns:62px 180px 1fr; gap:10px; padding:5px 8px; border-left:2px solid var(--line); background:rgba(255,255,255,.015); }
+      .ev:first-child { animation:flash .8s ease-out; } @keyframes flash { from { background:rgba(69,224,192,.18) } }
+      .ev--warn { border-left-color:var(--amber); } .ev--bad { border-left-color:var(--rose); } .ev--good { border-left-color:var(--pulse); } .ev--info { border-left-color:var(--blue); }
+      .ev__t { color:var(--dim); } .ev__type { color:var(--text); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .ev__d { color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .ev__d b { color:var(--text); font-weight:500; }
+      /* ---- tasks ------------------------------------------------------ */
+      .task { border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:10px; background:var(--slate); }
+      .task__row { display:flex; gap:10px; align-items:center; } .task__id { color:var(--dim); font-size:11px; } .task__kind { font-weight:700; }
+      .chip { padding:1px 8px; border-radius:999px; border:1px solid var(--line); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+      .chip[data-s=running],.chip[data-s=queued] { color:var(--amber); } .chip[data-s=waiting_user] { color:var(--rose); animation:blink 1s infinite; } .chip[data-s=paused] { color:var(--blue); } .chip[data-s=succeeded] { color:var(--pulse); } .chip[data-s=failed],.chip[data-s=cancelled] { color:var(--rose); }
+      @keyframes blink { 50% { opacity:.3 } }
+      .task__goal { margin:6px 0; color:var(--text); } .task__wait { margin:6px 0; color:var(--rose); }
+      .btns { display:flex; gap:6px; margin-top:6px; } button { font:inherit; font-size:11px; letter-spacing:.08em; text-transform:uppercase; background:transparent; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:4px 10px; cursor:pointer; } button:hover { border-color:var(--pulse); color:var(--pulse); }
+      .shot { margin-top:14px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#000; } .shot img { display:block; width:100%; } .shot__cap { padding:6px 10px; color:var(--dim); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .empty { color:var(--dim); padding:14px 0; }
+    </style>
+  </head>
+  <body>
+    <aside class="rail" id="rail"><div class="rail__spine"></div></aside>
+    <div class="shell">
+      <header class="head">
+        <div><h1 class="head__name" id="name">qwe agent</h1><p class="head__meta" id="meta">—</p></div>
+        <div class="lamp" id="lamp" data-state="offline">offline</div>
+      </header>
+      <section class="vitals" id="vitals"></section>
+      <div class="grid">
+        <section class="panel"><h2>Zdarzenia</h2><div class="log" id="log"></div></section>
+        <section class="panel"><h2>Zadania</h2><div id="tasks"><div class="empty">brak zadań</div></div><div id="shot"></div></section>
+      </div>
+    </div>
+    <script type="module">
+      const $ = id => document.getElementById(id);
+      const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+      const kindOf = t => /failed|cancelled|error/.test(t) ? 'bad' : /waiting|needs_user|paused/.test(t) ? 'warn' : /succeeded|completed/.test(t) ? 'good' : /observation|action|progress/.test(t) ? 'info' : '';
+      let lastSeq = 0; let lastShot = null;
+
+      function tick(kind) { const t = document.createElement('i'); t.className = 'tick' + (kind ? ` tick--${kind}` : ''); $('rail').appendChild(t); setTimeout(() => t.remove(), 9000); }
+      function describe(e) {
+        const d = e.data || {};
+        switch (e.type) {
+          case 'task.enqueued': return `<b>${esc(d.kind)}</b> ${esc((d.calls || []).join(', '))}`;
+          case 'task.waiting': return `<b>${esc(d.reason)}</b> ${esc(d.message)}`;
+          case 'tool.call': return `<b>${esc(d.name)}</b> ${esc((d.args && d.args._) || '')}`;
+          case 'tool.result': return `${d.ok ? 'ok' : 'błąd'} · ${d.ms}ms`;
+          case 'web.started': return esc(d.query); case 'web.progress': return esc(d.message); case 'web.completed': return `${(d.results || []).length} wyn. · ${d.provider} · ${d.ms}ms`;
+          case 'computer.started': return esc(d.goal);
+          case 'computer.observation': return `<b>${esc(d.title || '')}</b> ${esc(d.url)} ${(d.hints || []).join(' ')}`;
+          case 'computer.action': return `${d.step}. ${esc(d.label)} · ${d.status}${d.error ? ' · ' + esc(d.error) : ''}`;
+          case 'computer.completed': return esc(d.result); case 'computer.failed': case 'task.failed': return esc(d.error);
+          case 'step.started': case 'step.completed': case 'step.failed': case 'step.skipped': return `#${esc(e.stepId)} <b>${esc(d.name)}</b>${d.ms ? ' · ' + d.ms + 'ms' : ''}${d.error ? ' · ' + esc(d.error) : ''}`;
+          case 'plan.started': return (d.steps || []).map(s => `${s.id}:${s.name}${s.after.length ? '←' + s.after.join(',') : ''}`).join('  ');
+          default: return esc(JSON.stringify(d)).slice(0, 140);
+        }
+      }
+      function addEvent(e, live) {
+        lastSeq = Math.max(lastSeq, e.seq);
+        const k = kindOf(e.type);
+        const el = document.createElement('div');
+        el.className = 'ev' + (k ? ` ev--${k}` : '');
+        el.innerHTML = `<span class="ev__t">${new Date(e.at).toLocaleTimeString('pl-PL')}</span><span class="ev__type">${esc(e.type)}${e.sessionId ? ` <span style="color:var(--dim)">·${esc(e.sessionId.slice(-4))}</span>` : ''}${e.data && e.data.agent ? ` <span style="color:var(--blue)">@${esc(e.data.agent)}</span>` : ''}</span><span class="ev__d">${describe(e)}</span>`;
+        $('log').prepend(el);
+        while ($('log').children.length > 300) $('log').lastChild.remove();
+        if (live) tick(k);
+        if (e.type === 'computer.observation' && e.data.screenshotId) { lastShot = e.data; $('shot').innerHTML = `<div class="shot"><img src="/api/screenshots/${esc(e.data.screenshotId)}" alt="" /><div class="shot__cap">${esc(e.data.title || '')} — ${esc(e.data.url)}</div></div>`; }
+        if (/^task\./.test(e.type)) refreshTasks();
+      }
+      async function refreshStatus() {
+        try {
+          const s = await (await fetch('/api/status')).json();
+          $('name').textContent = s.identity.name; $('lamp').dataset.state = 'ready'; $('lamp').textContent = s.mock ? 'ready · mock' : 'ready';
+          $('meta').innerHTML = `v<b>${esc(s.identity.version)}</b> · instance <b>${esc(s.identity.instanceId)}</b> · tools <b>${s.tools.join(', ')}</b>`;
+          const v = s.tasks;
+          $('vitals').innerHTML = [['queued', v.queued], ['running', v.running], ['waiting', v.waiting_user], ['paused', v.paused], ['done', v.done], ['events', s.events]].map(([k, n]) => `<div class="vital"><div class="vital__n">${n}</div><div class="vital__k">${k}</div></div>`).join('');
+        } catch { $('lamp').dataset.state = 'offline'; $('lamp').textContent = 'offline'; }
+      }
+      async function refreshTasks() {
+        const { tasks } = await (await fetch('/api/tasks')).json();
+        if (!tasks.length) return;
+        $('tasks').innerHTML = tasks.slice(0, 12).map(t => {
+          const goal = t.block.kind === 'direct' ? t.block.calls.map(c => `${c.name}: ${c.args._ || ''}`).join(' · ') : t.block.steps.map(s => `${s.id}:${s.name}`).join(' → ');
+          const live = ['running', 'waiting_user', 'paused', 'queued'].includes(t.state);
+          return `<div class="task"><div class="task__row"><span class="task__kind">${esc(t.kind)}</span>${t.agent ? `<span class="chip">@${esc(t.agent)}</span>` : ''}<span class="chip" data-s="${t.state}">${t.state}</span><span class="task__id">${esc(t.id)} · ${esc((t.sessionId || '').slice(-5))}</span></div>
+            <div class="task__goal">${esc(goal).slice(0, 220)}</div>
+            ${t.waiting ? `<div class="task__wait">⏸ ${esc(t.waiting.reason)}: ${esc(t.waiting.message)}</div>` : ''}
+            ${t.error ? `<div class="task__wait">${esc(t.error)}</div>` : ''}
+            ${live ? `<div class="btns">${t.state === 'waiting_user' || t.state === 'paused' ? `<button data-op="resume" data-id="${t.id}">wznów</button>` : `<button data-op="pause" data-id="${t.id}">pauza</button>`}<button data-op="cancel" data-id="${t.id}">anuluj</button></div>` : ''}</div>`;
+        }).join('');
+        $('tasks').querySelectorAll('button').forEach(b => b.onclick = async () => { await fetch(`/api/tasks/${b.dataset.id}/${b.dataset.op}`, { method: 'POST' }); refreshTasks(); });
+      }
+      function stream() {
+        const es = new EventSource(`/api/events/stream?since=${lastSeq}`);
+        es.onmessage = m => addEvent(JSON.parse(m.data), true);
+        es.onerror = () => { es.close(); $('lamp').dataset.state = 'offline'; $('lamp').textContent = 'offline'; setTimeout(stream, 2000); };
+      }
+      (async () => {
+        await refreshStatus();
+        const { events } = await (await fetch('/api/events?limit=150')).json();
+        for (const e of events) addEvent(e, false);
+        await refreshTasks();
+        stream();
+        setInterval(refreshStatus, 5000);
+      })();
+    </script>
+  </body>
+</html>

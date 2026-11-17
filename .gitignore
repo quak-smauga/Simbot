@@ -1,0 +1,13 @@
+node_modules
+dist
+.env
+.qwe/
+data/
+*.log
+.DS_Store
+
+# simy żyją w agents/ (pamięć i skille zmieniają się w trakcie rozmów) — przykład: examples/kucharz
+agents/*
+!agents/.gitkeep
+data-test/
+apps/desktop/helper/build/

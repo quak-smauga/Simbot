@@ -1,0 +1,27 @@
+{
+  "name": "@qwe/plugin-web",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "qwe capability: web.query — szuka w internecie (tavily → brave → duckduckgo) i oddaje czytelną treść stron",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@qwe/core": "workspace:*",
+    "linkedom": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

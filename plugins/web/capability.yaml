@@ -1,0 +1,18 @@
+apiVersion: qwe/v1
+kind: Capability
+
+name: web
+version: 0.1.0
+description: Wyszukiwanie w internecie i czytanie stron (readability). Bez klucza działa na DuckDuckGo.
+
+# Capability deklaruje SWOJE zależności. qwe build je zbiera, unia trafia do warstwy capability-deps obrazu.
+dependencies:
+  npm:
+    - "@mozilla/readability@^0.6.0"
+    - "linkedom@^0.18.5"
+  system: []
+
+tools:
+  - name: web.query
+    usage: "<web.query>zapytanie do wyszukiwarki</web.query> — szuka w internecie i oddaje treść stron"
+    notes: "Jedno zapytanie w tagu, konkretne jak do Google. Nie wymyślaj wyników."

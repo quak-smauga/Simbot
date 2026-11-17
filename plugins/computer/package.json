@@ -1,0 +1,28 @@
+{
+  "name": "@qwe/plugin-computer",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "qwe capability: computer.run — Browser Runtime (Playwright): navigate/observe/click/type/press/scroll/wait/back, pętla observe→decide→act, login pause/resume",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --conditions=development src/selftest.ts"
+  },
+  "dependencies": {
+    "@qwe/core": "workspace:*",
+    "playwright": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0"
+  }
+}

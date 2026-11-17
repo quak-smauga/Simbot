@@ -1,0 +1,296 @@
+---
+// Mapa architektury na stronie głównej — każdy węzeł prowadzi do swojej strony docsów.
+// Zalążek „Architecture Explorera”: dane węzłów są w jednej tablicy (NODES), więc łatwo podmienić widok na graf.
+import Status from "./Status.astro";
+
+type Node = { id: string; title: string; sub: string; href: string; path: string; status: string; tone?: string };
+type Lane = { label: string; hint: string; nodes: Node[] };
+
+const LANES: Lane[] = [
+  {
+    label: "Interfejs",
+    hint: "co widzisz",
+    nodes: [
+      { id: "ui", title: "UI w przeglądarce", sub: "wątek, karty, kropka, simy", href: "/components/ui/", path: "apps/chat/public", status: "implemented" },
+      { id: "desktop", title: "Desktop", sub: "okno · widget · tray · skróty", href: "/components/desktop/", path: "apps/desktop", status: "implemented" },
+    ],
+  },
+  {
+    label: "Runtime",
+    hint: "co myśli i pracuje",
+    nodes: [
+      { id: "chat", title: "Chat server", sub: ":3100 · rozmowy, simy, głos, SQLite", href: "/components/chat/", path: "apps/chat", status: "implemented", tone: "accent" },
+      { id: "agent", title: "Agent server", sub: ":7777 · taski, plany, eventy (SSE)", href: "/components/agent/", path: "apps/agent", status: "implemented", tone: "accent" },
+    ],
+  },
+  {
+    label: "Capabilities",
+    hint: "czym działa",
+    nodes: [
+      { id: "web", title: "web.query", sub: "tavily → brave → ddg", href: "/capabilities/web/", path: "plugins/web", status: "implemented" },
+      { id: "computer", title: "computer.run", sub: "przeglądarka · desktop macOS", href: "/capabilities/computer/", path: "plugins/computer", status: "implemented" },
+      { id: "skills", title: "skill.save", sub: "sim uczy się workflowów", href: "/capabilities/skills/", path: "plugins/skills", status: "implemented" },
+      { id: "memory", title: "memory.search", sub: "poprzednie rozmowy", href: "/capabilities/memory/", path: "apps/chat/src/recall.ts", status: "implemented" },
+    ],
+  },
+];
+
+const LINKS = [
+  { label: "WS + REST", href: "/api/chat-ws/" },
+  { label: "POST /api/tasks · SSE", href: "/api/agent/" },
+];
+
+const FOUNDATION = [
+  { title: "@qwe/core", sub: "eventy · nativeapi · plan · capability · manifest · LLM", href: "/components/core/" },
+  { title: "@qwe/voice", sub: "VAD · STT · TTS", href: "/components/voice/" },
+  { title: "qwe CLI", sub: "dev · desktop · build · run", href: "/components/cli/" },
+];
+---
+
+<section class="sb-map" aria-label="Mapa architektury">
+  <div class="sb-map__grid">
+    {
+      LANES.map((lane, i) => (
+        <>
+          <div class="sb-lane">
+            <div class="sb-lane__head">
+              <span>{lane.label}</span>
+              <small>{lane.hint}</small>
+            </div>
+            {lane.nodes.map((n) => (
+              <a class:list={["sb-node", n.tone && `sb-node--${n.tone}`]} href={n.href} data-node={n.id}>
+                <span class="sb-node__title">{n.title}</span>
+                <span class="sb-node__sub">{n.sub}</span>
+                <span class="sb-node__foot">
+                  <code>{n.path}</code>
+                  {n.status !== "implemented" && <Status value={n.status} />}
+                </span>
+              </a>
+            ))}
+          </div>
+          {i < LINKS.length && (
+            <a class="sb-link" href={LINKS[i].href}>
+              <span class="sb-link__line" />
+              <span class="sb-link__label">{LINKS[i].label}</span>
+            </a>
+          )}
+        </>
+      ))
+    }
+  </div>
+  <div class="sb-found">
+    <span class="sb-found__label">Fundament</span>
+    {
+      FOUNDATION.map((f) => (
+        <a class="sb-found__item" href={f.href}>
+          <strong>{f.title}</strong>
+          <span>{f.sub}</span>
+        </a>
+      ))
+    }
+  </div>
+  <p class="sb-map__note">
+    Jeden strumień eventów łączy wszystko: <a href="/events/">capability → agent → SSE → chat → WS → UI → SQLite</a>.
+  </p>
+</section>
+
+<style>
+  .sb-map {
+    margin-top: 1rem;
+    padding: 1.25rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 16px;
+    background: linear-gradient(180deg, var(--sb-surface), color-mix(in srgb, var(--sb-surface) 60%, transparent));
+  }
+  .sb-map__grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+  .sb-lane {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+  .sb-lane__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    padding: 0 0.2rem;
+  }
+  .sb-lane__head small {
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--sl-color-gray-4);
+  }
+  .sb-node {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 12px;
+    border: 1px solid var(--sl-color-hairline-light);
+    background: var(--sb-surface-2);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, transform 0.15s, background 0.15s;
+    min-width: 0;
+  }
+  .sb-node:hover {
+    border-color: var(--sl-color-accent);
+    transform: translateY(-1px);
+  }
+  .sb-node--accent {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 40%, var(--sl-color-hairline-light));
+    background: color-mix(in srgb, var(--sl-color-accent) 7%, var(--sb-surface-2));
+    flex: 1;
+    justify-content: center;
+  }
+  .sb-node__title {
+    font-weight: 650;
+    font-size: 0.95rem;
+    color: var(--sl-color-white);
+  }
+  .sb-node__sub {
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.4;
+  }
+  .sb-node__foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    margin-top: 0.35rem;
+  }
+  .sb-node__foot code {
+    font-size: 0.68rem;
+    color: var(--sl-color-gray-3);
+    background: none;
+    border: 0;
+    padding: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .sb-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    width: 4.5rem;
+    text-decoration: none;
+  }
+  .sb-link__line {
+    width: 100%;
+    height: 1px;
+    background: repeating-linear-gradient(90deg, var(--sl-color-gray-4) 0 4px, transparent 4px 8px);
+    position: relative;
+  }
+  .sb-link__line::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    top: -3px;
+    border: 3.5px solid transparent;
+    border-left: 5px solid var(--sl-color-gray-4);
+  }
+  .sb-link__label {
+    font-size: 0.66rem;
+    text-align: center;
+    line-height: 1.3;
+    color: var(--sl-color-gray-3);
+    font-family: var(--__sl-font-mono);
+  }
+  .sb-link:hover .sb-link__label {
+    color: var(--sl-color-accent-high);
+  }
+  .sb-found {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem !important;
+    padding-top: 1rem;
+    border-top: 1px dashed var(--sl-color-hairline-light);
+  }
+  .sb-found__label {
+    font-size: 0.7rem;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    margin-right: 0.25rem;
+  }
+  .sb-found__item {
+    display: inline-flex;
+    flex-direction: column;
+    padding: 0.45rem 0.7rem;
+    border-radius: 10px;
+    border: 1px solid var(--sl-color-hairline-light);
+    text-decoration: none;
+    margin: 0 !important;
+  }
+  .sb-found__item:hover {
+    border-color: var(--sl-color-accent);
+  }
+  .sb-found__item strong {
+    font-size: 0.82rem;
+    color: var(--sl-color-white);
+  }
+  .sb-found__item span {
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-3);
+  }
+  .sb-map__note {
+    margin-top: 0.9rem !important;
+    font-size: 0.8rem;
+    color: var(--sl-color-gray-3);
+  }
+  .sb-map * + * {
+    margin-top: 0;
+  }
+
+  @media (max-width: 50rem) {
+    .sb-map {
+      padding: 1rem;
+    }
+    .sb-map__grid {
+      grid-template-columns: 1fr;
+    }
+    .sb-link {
+      width: 100%;
+      flex-direction: row;
+      gap: 0.6rem;
+      padding: 0.15rem 0;
+    }
+    .sb-link__line {
+      width: 1px;
+      height: 1.4rem;
+      background: repeating-linear-gradient(180deg, var(--sl-color-gray-4) 0 4px, transparent 4px 8px);
+    }
+    .sb-link__line::after {
+      right: auto;
+      left: -3px;
+      top: auto;
+      bottom: -2px;
+      border: 3.5px solid transparent;
+      border-top: 5px solid var(--sl-color-gray-4);
+    }
+    .sb-node--accent {
+      flex: none;
+    }
+  }
+</style>

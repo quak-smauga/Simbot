@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# qwe — zbudowane dist, jeśli jest; inaczej tsx na źródłach (dev). Dodaj do PATH: export PATH="$PWD/bin:$PATH"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$ROOT/packages/cli/dist/index.js" ]; then
+  exec node --no-warnings=ExperimentalWarning "$ROOT/packages/cli/dist/index.js" "$@"
+else
+  exec "$ROOT/node_modules/.bin/tsx" --conditions=development "$ROOT/packages/cli/src/index.ts" "$@"
+fi

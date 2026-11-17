@@ -1,0 +1,130 @@
+/* WIDGET — kropka → pigułka → karta. Okno Electrona jest przezroczyste i ma dokładnie rozmiar treści + margines na cień,
+   więc wszystko, co widać, rysuje .w (body jest przezroczyste). Tokeny z app.css (motyw wspólny z oknem głównym). */
+html, body.wbody { background: transparent !important; height: auto; }
+body.wbody {
+  display: block; overflow: hidden; padding: 12px; min-height: 0; height: auto; user-select: none; -webkit-user-select: none;
+  font-size: 14px;
+}
+.w { --card: color-mix(in srgb, var(--panel) 96%, transparent); --edge: color-mix(in srgb, var(--ink) 9%, transparent); display: inline-block; vertical-align: top; }
+html[data-theme="dark"] .w { --card: rgba(26, 27, 26, 0.97); }
+.w.enter > * { animation: w-in 0.32s var(--ease) both; }
+.w.leave > * { animation: w-out 0.16s ease-in both; }
+@keyframes w-in { from { opacity: 0; transform: translateY(-4px) scale(0.96); transform-origin: top right; } }
+@keyframes w-out { to { opacity: 0; transform: scale(0.94); transform-origin: top right; } }
+
+/* ── 1 · spoczynek: kropka z logo, plakietka = stan ── */
+.wdot {
+  position: relative; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card); border: 1px solid var(--edge); color: var(--ink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 6px color-mix(in srgb, var(--ink) 3%, transparent);
+  transition: transform 0.2s var(--ease);
+}
+.wdot:hover { transform: scale(1.06); }
+.wdot:active { transform: scale(0.95); }
+.wdot .qlogo { --s: 26px; }
+.wdot__badge { position: absolute; top: 1px; right: 1px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--card); background: var(--q-green); display: none; }
+/* stan = kolor: niebieski pracuje · żółty czeka na Ciebie (pulsuje) · czerwony błąd / ktoś Cię woła · szary wstrzymane */
+.wdot[data-badge="working"] .wdot__badge { display: block; background: var(--q-blue); }
+.wdot[data-badge="waiting"] .wdot__badge { display: block; background: var(--q-yellow); animation: w-pulse 1.4s ease-in-out infinite; }
+.wdot[data-badge="error"] .wdot__badge, .wdot[data-badge="call"] .wdot__badge { display: block; background: var(--q-red); }
+.wdot[data-badge="paused"] .wdot__badge { display: block; background: var(--ink-3); }
+/* zwinięta praca: awatar sima w pierścieniu */
+.wdot--sim .avatar { --s: 34px; }
+.wdot__ring { position: absolute; inset: -3px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--c, var(--q-green)); animation: w-spin 1.1s linear infinite; }
+@keyframes w-spin { to { transform: rotate(360deg); } }
+@keyframes w-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--q-yellow) 30%, transparent); } }
+
+/* ── karta (wspólne dla polecenia, pracy, czekania, gotowe) ── */
+.wcard {
+  width: 340px; background: var(--card); border: 1px solid var(--edge); border-radius: 18px; color: var(--ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2); padding: 14px; display: flex; flex-direction: column; gap: 12px;
+}
+.wcard--wide { width: 380px; }
+.whead { display: flex; align-items: center; gap: 8px; min-height: 38px; cursor: grab; }
+.w.dragging, .w.dragging * { cursor: grabbing !important; }
+.w.dragging .wdot { transform: scale(1.04); }
+.whead .avatar { --s: 36px; }
+.whead__t { flex: 1; min-width: 0; margin-left: 2px; }
+.whead__name { font-weight: 650; font-size: 15px; line-height: 1.2; }
+.whead__sub { font-size: 12.5px; color: var(--ink-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.whead__sub i { width: 6px; height: 6px; border-radius: 50%; background: var(--q-blue); flex: none; }
+.whead__sub[data-s="waiting"] i { background: var(--q-yellow); }
+.whead__sub[data-s="paused"] i { background: var(--ink-3); }
+.whead__sub[data-s="done"] i { background: var(--q-green); }
+.whead__sub[data-s="failed"] i { background: var(--q-red); }
+.whead .ib, .wdone__btns .ib { width: 28px; height: 28px; color: var(--ink-3); cursor: pointer; }
+.wdone__btns { display: flex; gap: 2px; }
+.whead .ib:hover { color: var(--ink); }
+
+/* postęp: segmenty kroków planu albo pasek kroków komputera */
+.wprog { display: flex; gap: 4px; }
+.wprog span { flex: 1; height: 4px; border-radius: 4px; background: var(--soft-2); }
+.wprog span.done { background: var(--q-green); }
+.wprog span.cur { background: var(--q-blue); }
+.wprog span.bad { background: var(--q-red); }
+.wbar { height: 4px; border-radius: 4px; background: var(--soft-2); overflow: hidden; }
+.wbar i { display: block; height: 100%; background: var(--q-green); border-radius: 4px; transition: width 0.4s var(--ease); }
+
+.wstep { display: flex; gap: 10px; font-size: 14px; line-height: 1.4; }
+.wstep__n { color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 14px; }
+.wstep__t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wstep__t small { display: block; color: var(--ink-3); font-family: var(--mono); font-size: 11.5px; margin-top: 2px; }
+.wshot { border-radius: 12px; overflow: hidden; background: var(--soft); aspect-ratio: 16 / 10; position: relative; }
+.wshot img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.wshot span { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font: 11px var(--mono); color: #eee; background: linear-gradient(transparent, rgba(0, 0, 0, 0.65)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.wbtns { display: flex; gap: 8px; }
+.wbtns .btn { flex: 1; height: 40px; border-radius: 12px; }
+.wbtns .btn--stop { color: var(--q-red); flex: 1; }
+.wbtns .btn--sq { flex: 0 0 44px; padding: 0; color: var(--q-red); }
+.wbtns .btn--primary { flex: 2; }
+.wkey { font: 11px var(--mono); opacity: 0.55; margin-left: 2px; }
+.wfoot { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 10px; margin-top: -2px; }
+
+/* ── 5 · czeka na Ciebie: pytanie + dane z ekranu ── */
+.wcard--waiting { animation: w-attn 2.4s ease-in-out infinite; }
+@keyframes w-attn { 50% { box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), 0 0 0 4px color-mix(in srgb, var(--q-yellow) 22%, transparent); } }
+.wq { font-size: 16.5px; font-weight: 650; line-height: 1.3; }
+.wmsg { font-size: 13.5px; color: var(--ink-2); margin-top: -4px; }
+.wrows { margin: 0; background: var(--soft); border-radius: 12px; font-size: 14px; }
+.wrows > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 12px; border-top: 1px solid var(--line); }
+.wrows > div:first-child { border-top: 0; }
+.wrows dt { color: var(--ink-3); }
+.wrows dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wrows > div:last-child dd { font-weight: 700; }
+
+/* ── 2 · polecenie ── */
+.wcard--cmd { width: 420px; padding: 10px 10px 10px 12px; gap: 10px; }
+.wcmd { display: flex; align-items: flex-start; gap: 10px; }
+.wcmd .qlogo { --s: 24px; margin-top: 7px; }
+.wcmd textarea { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; resize: none; font-size: 15px; line-height: 1.45; padding: 7px 0; max-height: 140px; user-select: text; -webkit-user-select: text; }
+.wcmd textarea::placeholder { color: var(--ink-3); }
+.wsend { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--bg); flex: none; transition: opacity 0.2s, transform 0.15s var(--ease); }
+.wsend:disabled { opacity: 0.35; cursor: default; }
+.wsend:not(:disabled):active { transform: scale(0.92); }
+.wchips { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 34px; }
+.wchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; background: var(--soft); font-size: 13px; color: var(--ink-2); }
+.wchip .avatar { --s: 16px; }
+.wchip--off { opacity: 0.45; }
+button.wchip:hover { background: var(--soft-2); color: var(--ink); }
+
+/* ── 6 · gotowe ── */
+.wcard--done { width: 380px; flex-direction: row; align-items: flex-start; gap: 12px; padding: 14px; cursor: grab; }
+.wcard--done .avatar { --s: 38px; }
+.wdone { flex: 1; min-width: 0; }
+.wdone__t { font-weight: 650; font-size: 15px; line-height: 1.3; }
+.wdone__p { font-size: 13px; color: var(--ink-2); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.wdone__hint { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; }
+.wcard--done.bad .wdone__t { color: var(--q-red); }
+
+/* inne rozmowy, w których simy pracują — klik przełącza widget */
+.wothers { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 10px; margin-top: -2px; }
+.wother { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; font-size: 12.5px; color: var(--ink-2); text-align: left; }
+.wother:hover { background: var(--soft); color: var(--ink); }
+.wother .avatar { --s: 18px; }
+.wother__t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wother i { width: 7px; height: 7px; border-radius: 50%; background: var(--q-blue); flex: none; }
+.wother i[data-s="waiting"] { background: var(--q-yellow); }
+.wother--more { color: var(--ink-3); padding-left: 32px; }
+.wcmd { cursor: grab; }
+.wcmd textarea { cursor: text; }

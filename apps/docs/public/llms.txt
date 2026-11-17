@@ -1,0 +1,60 @@
+# Simbot Docs
+
+> Simbot (kod: qwe) — aplikacja z simami: agentami z rolą, personą, narzędziami, skillami i pamięcią. Rozmowy z jednym albo wieloma simami (@sim, @sim.task), agent server wykonujący zadania (web.query, computer.run w przeglądarce i na pulpicie macOS, skill.save), głos (ElevenLabs) i aplikacja desktopowa na Electronie z widgetem. Monorepo pnpm, TypeScript, Node >= 22.13. Dokumentacja po polsku. Źródło treści: apps/docs/src/content/docs/**/*.md.
+
+## Wprowadzenie
+- [Czym jest Simbot](/overview/introduction/): całość na jednym diagramie, trzy zasady, co działa
+- [Pojęcia](/overview/concepts/): sim, rozmowa, workflow, capability, tool, task, plan, event
+- [Szybki start](/overview/quickstart/): instalacja, qwe dev, qwe desktop, tryb mock
+
+## Architektura
+- [Procesy i komunikacja](/architecture/system/): chat :3100, agent :7777, Electron, helper Swift, kanały, tryby agenta
+- [Cykl życia tury](/architecture/lifecycle/): dispatch @, BotRunner, nativeapi → task → nativeresult, stany
+- [Dane i pamięć](/architecture/data/): data/, SQLite, kontekst modelu, warstwy pamięci
+
+## Komponenty
+- [@qwe/core](/components/core/): eventy, parser, plan, capability, manifest, LLM, mentions, command router
+- [Chat server](/components/chat/): apps/chat
+- [Agent server](/components/agent/): apps/agent
+- [Desktop (Electron)](/components/desktop/): okna, widget, tray, skróty, helper
+- [@qwe/voice](/components/voice/): VAD, STT, TTS
+- [CLI qwe](/components/cli/)
+- [UI](/components/ui/): vanilla JS w apps/chat/public
+
+## Kontrakty
+- [<nativeapi> i plany](/contracts/nativeapi/): składnia direct/plan, nativeresult, executor
+- [Mentions](/contracts/mentions/)
+- [AgentManifest.yaml](/contracts/agent-manifest/)
+- [Kontrakt capability](/contracts/capability/): capability.yaml, create(ctx), ToolCallContext, ToolResult
+
+## API
+- [Chat REST](/api/chat-rest/)
+- [Chat WebSocket](/api/chat-ws/)
+- [Agent API](/api/agent/): REST + SSE
+- [Desktop API](/api/desktop/): window.qwe, desktop bridge, protokół qwe-helper
+
+## Eventy
+- [Eventy](/events/): AgentEvent, katalog, persystencja
+
+## Capabilities
+- [Przegląd](/capabilities/overview/)
+- [web.query](/capabilities/web/)
+- [computer.run](/capabilities/computer/)
+- [skill.save](/capabilities/skills/)
+- [Serwery MCP](/capabilities/mcp/): wiele serwerów Model Context Protocol, tagi mcp.<serwer>.<narzędzie>
+- [Pamięć i memory.search](/capabilities/memory/)
+- [Napisz własną capability](/capabilities/writing-plugins/)
+
+## Development
+- [Konfiguracja (env)](/development/configuration/)
+- [Testy i debugowanie](/development/testing/)
+- [Docker](/development/docker/)
+- [Ten portal](/development/docs-portal/)
+
+## Status
+- [Status i roadmapa](/status/roadmap/): działa / częściowo / planowane, rozjazdy dokumentacji
+- [Changelog architektury](/status/changelog/)
+
+## Utrzymanie
+- [Przewodnik utrzymania](/maintenance/guide/)
+- [Mapa repo → docs](/maintenance/mapping/)

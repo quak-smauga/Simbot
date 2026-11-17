@@ -1,0 +1,28 @@
+apiVersion: qwe/v1
+kind: Capability
+
+name: computer
+version: 0.1.0
+description: >
+  Dwa osobne środowiska pod jednym narzędziem: przeglądarka wbudowana (Playwright, trwały profil: cookies, sesje, karty)
+  i cały komputer macOS (target="desktop"). Każde ma własny planner i executor; wspólna jest pętla i raport.
+  Agent planuje, computer działa, observer wie, co się wydarzyło. Login/wrażliwe operacje = pauza i czekanie na usera.
+
+dependencies:
+  npm:
+    - "playwright@1.63.0"
+  # Chromium i jego biblioteki systemowe dokłada obraz bazowy (docker/runtime.Dockerfile) — tu tylko npm.
+  system: []
+
+tools:
+  - name: computer.run
+    usage: "<computer.run>co zrobić w przeglądarce i jaki rezultat chcesz</computer.run> — wbudowana przeglądarka: otwiera strony, klika, wpisuje, czyta; wraca z krótkim raportem"
+    notes: |
+      Opisz CEL i oczekiwany rezultat, nie kliknięcia. Przykład: "Otwórz quak.com.pl, sprawdź jakie są podstrony i podsumuj".
+      Domyślnie to WBUDOWANA przeglądarka (własne okno simbota), nie przeglądarka usera — w celu pisz o stronie, nie o Brave/Chrome.
+      Jeśli strona wymaga logowania, wykonawca sam zatrzyma się i poprosi usera — nie podawaj haseł.
+      Operacje wrażliwe (wysłanie formularza, zakup, usunięcie) wykonawca potwierdza z userem.
+      target="desktop" = osobne środowisko: cały komputer usera (macOS: aplikacje, pliki, okna):
+      <computer.run target="desktop">Otwórz Notatki i zapisz nową notatkę „zakupy: mleko, chleb”</computer.run>
+      Strony WWW rób domyślnym trybem (przeglądarka) — jest pewniejszy. Desktop tylko dla natywnych aplikacji, plików i rzeczy poza przeglądarką.
+      W Terminalu, Ustawieniach systemowych i menedżerach haseł każda akcja czeka na potwierdzenie usera.

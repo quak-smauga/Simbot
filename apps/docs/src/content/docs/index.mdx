@@ -1,0 +1,62 @@
+---
+title: Start
+description: Żywa dokumentacja Simbota — simy, rozmowy, agent z komputerem i desktop. Opisane na podstawie kodu.
+template: splash
+tableOfContents: false
+pagefind: true
+---
+
+import Hero from "../../components/Hero.astro";
+import ArchitectureMap from "../../components/ArchitectureMap.astro";
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<Hero />
+
+## Mapa systemu
+
+Kliknij moduł, żeby przejść do jego dokumentacji. Szczegóły połączeń: [Procesy i komunikacja](/architecture/system/).
+
+<ArchitectureMap />
+
+## Jak to działa w czterech zdaniach
+
+<CardGrid>
+  <Card title="Model mówi, świat woła tagiem" icon="comment">
+    Sim pisze tekst, który od razu leci do UI i syntezy mowy. Gdy potrzebuje świata, kończy odpowiedź blokiem
+    [`<nativeapi>`](/contracts/nativeapi/) — direct call albo plan z zależnościami.
+  </Card>
+  <Card title="Chat i agent to osobne procesy" icon="setting">
+    Chat trzyma rozmowy, simy i głos. Agent wstaje leniwie, wykonuje taski i nadaje eventy. Może chodzić na hoście
+    albo w Dockerze.
+  </Card>
+  <Card title="Wszystko jest eventem" icon="random">
+    Jedna koperta [`AgentEvent`](/events/) płynie od capability do karty w czacie, widgetu i bazy. Historia
+    odtwarza się po reloadzie.
+  </Card>
+  <Card title="Sim to folder" icon="document">
+    `agents/<name>/`: [manifest](/contracts/agent-manifest/), persona, skille, pamięć i własne pluginy. Simy rozmawiają
+    w jednej rozmowie i wołają się nawzajem przez [`@`](/contracts/mentions/).
+  </Card>
+</CardGrid>
+
+## Zacznij tutaj
+
+<CardGrid>
+  <LinkCard title="Szybki start" description="pnpm install → qwe dev → pierwsza rozmowa z simem." href="/overview/quickstart/" />
+  <LinkCard title="Pojęcia" description="Sim, rozmowa, workflow, capability, task, plan — słownik." href="/overview/concepts/" />
+  <LinkCard title="Cykl życia tury" description="Od wiadomości usera do odpowiedzi sima, krok po kroku." href="/architecture/lifecycle/" />
+  <LinkCard title="Napisz capability" description="Własne narzędzie dla sima w kilkunastu linijkach." href="/capabilities/writing-plugins/" />
+</CardGrid>
+
+## Referencja
+
+<CardGrid>
+  <LinkCard title="Chat REST + WebSocket" description="Simy, rozmowy, workflowy, sterowanie zadaniami, lobby." href="/api/chat-rest/" />
+  <LinkCard title="Agent API" description="Taski, pause/resume/cancel, SSE, screenshoty." href="/api/agent/" />
+  <LinkCard title="Desktop API" description="window.qwe, desktop bridge, protokół qwe-helper." href="/api/desktop/" />
+  <LinkCard title="Konfiguracja" description="Wszystkie zmienne env znalezione w kodzie." href="/development/configuration/" />
+</CardGrid>
+
+:::note[Zasada tego portalu]
+Dokumentujemy to, co **faktycznie istnieje** w kodzie. Każda strona techniczna ma status i ścieżki do plików źródłowych. Plany mają swoje miejsce: [Status i roadmapa](/status/roadmap/).
+:::

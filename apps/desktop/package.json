@@ -1,0 +1,17 @@
+{
+  "name": "@qwe/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "qwe desktop — skorupa Electrona nad chat serverem: okno główne, widget nad wszystkim, tray, skróty globalne",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "mock": "electron . --mock",
+    "icons": "node scripts/make-icons.js",
+    "helper": "mkdir -p helper/build && swiftc -O -target $(uname -m)-apple-macos14.0 helper/qwe-helper.swift -o helper/build/qwe-helper"
+  },
+  "devDependencies": {
+    "electron": "45.2.3"
+  }
+}
