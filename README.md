@@ -1,5 +1,10 @@
 # Simbot
 
+<p align="center">
+    <img src="hero-mcp.png" width="49%" />
+    <img src="hero-voice.png"  width="49%" />
+</p>
+
 **Simy** to agenci z własną rolą, personą, narzędziami, skillami i pamięcią. Rozmawiasz z jednym albo kilkoma naraz (`@sim`, `@sim.task`). Sim, kiedy trzeba, szuka w sieci albo **bierze komputer** — przeglądarkę albo cały pulpit macOS — klika, czyta i wraca z raportem. Działa w przeglądarce i jako aplikacja desktopowa na Electronie z widgetem nad wszystkimi oknami.
 
 W kodzie projekt nazywa się **qwe** (`@qwe/*`, CLI `qwe`, zmienne `QWE_*`).
