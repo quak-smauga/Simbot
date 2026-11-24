@@ -4,15 +4,17 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright";
-import { OBSERVE_BASIC_SRC, OBSERVE_SRC } from "./observe-script.js";
+import { HIT_SRC, OBSERVE_BASIC_SRC, OBSERVE_SRC } from "./observe-script.js";
 
 export interface Observation {
   url: string;
   title: string;
   /** Interaktywne elementy, indeksowane — click/type celują w `[N]`. */
   elements: PageElement[];
-  /** Fragment widocznego tekstu (nagłówki + akapity), przycięty. */
+  /** Tekst tego, co TERAZ w widoku (zmienia się po przewinięciu) + nagłówki spod widoku. To dostaje model. */
   text: string;
+  /** Cały tekst strony (innerText, przycięty) — tylko dla executora: sprawdzanie warunków etapów. Do modelu nie idzie. */
+  fullText?: string;
   /** Heurystyki stanu — podpowiedzi dla decydenta. */
   hints: string[];
   screenshot: Buffer;
@@ -47,6 +49,10 @@ export interface BrowserOptions {
 }
 
 const ATTR = "data-qwe-id";
+/** Tyle czekamy na zmianę adresu po kliknięciu w link (zwykła nawigacja kończy się dużo szybciej; to limit dla ociężałych SPA). */
+const LINK_NAV_MS = 3000;
+/** Pełny tekst strony dla executora (warunki etapów). */
+const FULL_TEXT_CHARS = 120_000;
 
 /**
  * Błąd kliku Playwrighta ma sedno w dalszych liniach logu („<div …> intercepts pointer events”), a pierwsza to tylko „Timeout”.
@@ -140,7 +146,12 @@ export class BrowserRuntime {
     const loc = page.locator(`[${ATTR}="${target}"]`).first();
     if (!(await loc.count())) throw new Error(`brak elementu [${target}] — zrób observe`);
     await loc.scrollIntoViewIfNeeded().catch(() => {});
+    // link, który ma zmienić adres: po kliknięciu czekamy na tę zmianę (SPA robi to z opóźnieniem — bez tego obserwacja
+    // pokazuje jeszcze starą stronę, a następny klik trafia w elementy, których już nie ma)
+    const before = page.url();
+    const href = await loc.evaluate((el) => { const a = (el as Element).closest("a[href]") as HTMLAnchorElement | null; return a && a.target !== "_blank" ? a.href : ""; }).catch(() => "");
     await loc.click({ timeout: 6000 }).catch((e) => { throw explainActionError(e); });
+    if (href && /^https?:/i.test(href) && href !== before) await page.waitForURL((u) => u.href !== before, { timeout: LINK_NAV_MS, waitUntil: "commit" }).catch(() => {});
     await this.settle();
   }
   async type(target: number | undefined, text: string, submit = false) {
@@ -155,14 +166,19 @@ export class BrowserRuntime {
     if (submit) await page.keyboard.press("Enter");
     await this.settle();
   }
-  /** Klik w punkt ze screenshota: x, y w ułamkach 0..1 viewportu (screenshot = viewport). Ostateczny fallback — canvas, obrazki. */
-  async clickAt(x: number, y: number) {
+  /**
+   * Klik w punkt ze screenshota: x, y w ułamkach 0..1 viewportu (screenshot = viewport). Ostateczny fallback — canvas, obrazki.
+   * Zwraca `hit`: co leżało w tym punkcie tuż przed kliknięciem („a.close „Zamknij x””, „iframe#ad — ramka”, „div — NIC KLIKALNEGO”).
+   */
+  async clickAt(x: number, y: number): Promise<{ hit?: string }> {
     const page = await this.ensure();
     const { px, py } = this.toPx(page, x, y);
+    const hit = await page.evaluate<string>(`(${HIT_SRC})(${JSON.stringify({ x: px, y: py, ATTR })})`).catch(() => undefined);
     await page.mouse.move(px, py, { steps: 6 });
     await page.waitForTimeout(60);
     await page.mouse.click(px, py);
     await this.settle();
+    return { hit };
   }
   async hover(target?: number, x?: number, y?: number) {
     const page = await this.ensure();
@@ -204,10 +220,10 @@ export class BrowserRuntime {
   /** OBSERVE: DOM (elementy + tekst) + screenshot + hinty. Zawsze po akcji. */
   async observe(opts: { maxElements?: number; textChars?: number } = {}): Promise<Observation> {
     const page = await this.ensure();
-    const { maxElements = 70, textChars = 1800 } = opts;
+    const { maxElements = 70, textChars = 2400 } = opts;
     // Skrypt DOM jako STRING: tsx/esbuild w dev owija funkcje helperem __name, którego nie ma w przeglądarce.
     const run = <T,>(src: string, arg: unknown) => page.evaluate<T>(`(${src})(${JSON.stringify(arg)})`);
-    const snap = await run<Omit<Observation, "screenshot" | "observationId" | "at">>(OBSERVE_SRC, { ATTR, maxElements, textChars }).catch(async (e: Error) => {
+    const snap = await run<Omit<Observation, "screenshot" | "observationId" | "at">>(OBSERVE_SRC, { ATTR, maxElements, textChars, fullChars: FULL_TEXT_CHARS }).catch(async (e: Error) => {
       this.opts.log("warn", `[computer] observe: ${e.message.split("\n")[0]}`);
       // awaryjnie: najprostsza lista linków/przycisków, żeby decydent miał na czym działać
       const basic = await run<{ url: string; title: string; elements: PageElement[]; text: string }>(OBSERVE_BASIC_SRC, ATTR).catch(() => ({ url: page.url(), title: "", elements: [] as PageElement[], text: "" }));
@@ -230,5 +246,5 @@ export class BrowserRuntime {
 /** Tekstowa postać obserwacji dla modelu (bez screenshotu). */
 export function describeObservation(o: Observation, maxEl = 70): string {
   const els = o.elements.slice(0, maxEl).map((e) => `[${e.id}] ${e.role} "${e.name}"${e.href ? ` → ${e.href}` : ""}${e.value ? ` (wpisane: "${e.value}")` : ""}${e.tooltip ? ` dymek(title): "${e.tooltip}"` : ""}${e.box ? ` box=[${e.box.join(",")}]` : ""}${e.occluded ? ` (zasłonięty przez ${e.occluded})` : ""}${e.inViewport ? "" : " (poza ekranem)"}`);
-  return [`URL: ${o.url}`, `TYTUŁ: ${o.title || "(brak)"}`, o.hints.length ? `HINTY: ${o.hints.join(", ")}` : "", `ELEMENTY (${o.elements.length}):`, els.join("\n") || "(brak)", `TEKST:`, o.text || "(brak)"].filter(Boolean).join("\n");
+  return [`URL: ${o.url}`, `TYTUŁ: ${o.title || "(brak)"}`, o.hints.length ? `HINTY: ${o.hints.join(", ")}` : "", `ELEMENTY (${o.elements.length}):`, els.join("\n") || "(brak)", `TEKST (to, co teraz w widoku — po przewinięciu będzie inny):`, o.text || "(brak)"].filter(Boolean).join("\n");
 }

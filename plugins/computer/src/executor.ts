@@ -1,10 +1,13 @@
 // COMPUTER TASK LOOP — OBSERVE → DECIDE → ACT → OBSERVE → VERIFY → … Fundament: obserwacja po każdej akcji.
 // Eventy (do istniejącego streamu, przez call.emit):
 //   computer.started { goal } · computer.observation { url, title, screenshotId, hints, elements } ·
-//   computer.action { step, action, target, status: started|completed|failed, error? } · computer.note { text } ·
+//   computer.action { step, action, label, status: started } → po akcji i nowej obserwacji { status: completed|failed, error?, outcome, url }
+//     outcome = co akcja dała („PRZEKIEROWANO na …”, „nowa strona: …”, „bez zmian”, „trafiono w: …”) — to samo dostaje decydent w logu ·
+//   computer.note { text } ·
 //   computer.loop { description, count, strategyChange } · computer.resumed · computer.completed { result, steps, status } ·
 //   computer.failed { error, status } · computer.cancelled { report } ·
-//   computer.plan { replan, alreadyDone, estimatedSteps, budget, cap, stages[] } · computer.stage { id, title, status: done|skipped, next }
+//   computer.plan { replan, alreadyDone, estimatedSteps, budget, cap, stages[] } · computer.stage { id, title, status: done|unconfirmed, auto?, by?, next }
+//     auto = etap zaliczył executor z warunku `check` planu (by: „URL xkcd.com/1773/”); unconfirmed = „done” bez zaliczenia etapu
 //   computer.started niesie mode: browser|desktop — UI nazywa zadanie „przeglądarka” albo „komputer”.
 //
 // PLAN: przed pętlą planner ocenia obserwację — cel już spełniony → koniec bez kliknięcia; inaczej etapy z „zrobione, gdy…”
@@ -18,12 +21,14 @@
 import type { ToolCallContext, ToolResult } from "@qwe/core";
 import type { BrowserRuntime, Observation } from "./browser.js";
 import type { Decider, Decision } from "./decider.js";
-import { budgetFor, type Planner, type Stage, type TaskPlan } from "./planner.js";
+import { bareUrl, budgetFor, checkStage, type Planner, type Stage, type TaskPlan } from "./planner.js";
 
 export type ComputerStatus = "ok" | "partial" | "cancelled_by_user" | "failed";
 
 /** To, czego executor potrzebuje od przeglądarki (testy podstawiają atrapę). */
-export type BrowserLike = Pick<BrowserRuntime, "observe" | "navigate" | "click" | "clickAt" | "hover" | "type" | "press" | "scroll" | "wait" | "back"> & {
+export type BrowserLike = Pick<BrowserRuntime, "observe" | "navigate" | "click" | "hover" | "type" | "press" | "scroll" | "wait" | "back"> & {
+  /** przeglądarka zwraca `hit` — co leżało w klikanym punkcie; desktop i atrapy mogą nie zwracać nic */
+  clickAt(x: number, y: number): Promise<{ hit?: string } | void>;
   /** desktop: uruchom / przełącz aplikację */
   openApp?(name: string): Promise<void>;
 };
@@ -114,8 +119,32 @@ function describeTarget(d: Decision, o: Observation): string {
   return el ? `${key} „${el.name.slice(0, 50) || "bez nazwy"}” (${el.role})` : key;
 }
 
+const flatUrl = (u: string) => bareUrl(/^[a-z]+:\/\//i.test(u) ? u : `https://${u}`).replace(/[#?].*$/, "").replace(/\/$/, "").toLowerCase();
+/**
+ * Co akcja DAŁA — z faktów, które executor ma (adres przed/po, zmiana treści, błąd, punkt trafienia). Idzie do logu decydenta,
+ * do raportu i do UI. Bez tego decydent widział „navigate /random → ok” i stronę /1773, i uznawał, że losowanie nie zadziałało.
+ */
+function describeOutcome(x: { d: Decision; prev: Observation; obs: Observation; changed: boolean; actionError: string | null; hit?: string }): string {
+  const { d, prev, obs, changed, actionError, hit } = x;
+  const moved = pageKey(obs.url) !== pageKey(prev.url);
+  const here = `${obs.url}${obs.title ? ` „${obs.title.slice(0, 60)}”` : ""}`;
+  if (actionError) return moved ? `NIE WYKONANO (${actionError}) — bo strona w międzyczasie przeszła na ${here}: wcześniejsza akcja zadziałała z opóźnieniem. To nie błąd strony; pracuj na nowej obserwacji.` : `BŁĄD: ${actionError}`;
+  const tail = hit ? ` · trafiono w: ${hit}` : "";
+  if (d.action === "navigate") {
+    if (/^chrome-error:/i.test(obs.url)) return "BŁĄD: strona się nie załadowała (błąd sieci albo zły adres)";
+    if (flatUrl(d.url) === flatUrl(obs.url)) return `ok — otwarto ${here}`;
+    if (!moved && !changed) return `nie zadziałało — adres się nie otworzył, dalej jesteś na ${here}`;
+    return `ok — PRZEKIEROWANO na ${here}. To JEST wynik tej akcji (adres ${bareUrl(d.url)} sam przenosi dalej) — nie powtarzaj jej.`;
+  }
+  if (moved) return `ok — nowa strona: ${here}${tail}`;
+  if (changed) return `ok — ta sama strona, widok albo treść się zmieniły${tail}`;
+  return `bez zmian (ten sam adres i ta sama treść)${tail}`;
+}
+
 /** Ślad zadania: wszystko, co potem trafia do raportu i do promptu decydenta (zamiast tylko ostatnich 10 kroków). */
 class Trace {
+  /** Strona, na której przeglądarka stała PRZED zadaniem (zostaje po poprzednim) — nie jest częścią tego zadania. */
+  start: { url: string; title: string } | null = null;
   visits: { url: string; title: string }[] = [];
   visitCount = new Map<string, number>();
   notes: string[] = [];
@@ -133,38 +162,53 @@ class Trace {
 
   /** Bieżący etap = pierwszy otwarty (ani zrobiony, ani pominięty). */
   get current() {
-    return this.stages.find((s) => s.status !== "done" && s.status !== "skipped");
+    return this.stages.find((s) => s.status !== "done" && s.status !== "skipped" && s.status !== "unconfirmed");
   }
-  /**
-   * stage_done od decydenta → etap zrobiony. Etapy są po kolei, więc wcześniejsze, wciąż otwarte = pominięte
-   * (decydent poszedł dalej bez nich — zbędne albo niesprawdzalne), a nie „w toku” do końca zadania.
-   */
-  advance(d: Decision): { done: Stage; skipped: Stage[] } | null {
+  /** stage_done od decydenta → etap zrobiony. Wcześniejsze otwarte etapy ZOSTAJĄ otwarte (kiedyś stawały się „pominięte” — to kłamało). */
+  advance(d: Decision): Stage | null {
     if (!d.stage_done || !this.stages.length) return null;
     const s = this.stages.find((x) => x.id === d.stage) ?? this.current;
     if (!s || s.status === "done") return null;
-    const skipped = this.stages.filter((x) => x.id < s.id && x.status !== "done" && x.status !== "skipped");
-    for (const x of skipped) x.status = "skipped";
     s.status = "done";
+    s.doneBy = "decydent";
     const next = this.current;
     if (next) next.status = "doing";
-    return { done: s, skipped };
+    return s;
   }
-  /** Zadanie skończone sukcesem: to, co zostało otwarte, nie było potrzebne. Zwraca świeżo pominięte. */
+  /** Etapy z warunkiem `check` zalicza executor sam, z obserwacji — bez czekania, aż model przypomni sobie o stage_done. */
+  auto(o: Observation): Stage[] {
+    const done: Stage[] = [];
+    for (const s of this.stages) {
+      if (s.status === "done" || !s.check) continue;
+      const by = checkStage(s.check, o);
+      if (!by) continue;
+      s.status = "done";
+      s.doneBy = by;
+      done.push(s);
+    }
+    const next = this.current;
+    if (done.length && next && next.status === "todo") next.status = "doing";
+    return done;
+  }
+  /** Zadanie skończone „done”: etapy, których nikt nie zaliczył, są NIEPOTWIERDZONE (nie „niepotrzebne”). Zwraca je. */
   closeOpen(): Stage[] {
-    const open = this.stages.filter((s) => s.status !== "done" && s.status !== "skipped");
-    for (const s of open) s.status = "skipped";
+    const open = this.stages.filter((s) => s.status !== "done" && s.status !== "skipped" && s.status !== "unconfirmed");
+    for (const s of open) s.status = "unconfirmed";
     return open;
   }
   planText(): string {
     if (!this.stages.length) return "";
     const cur = this.current;
-    const lines = this.stages.map((s) => `${s.status === "done" ? "✓" : s.status === "skipped" ? "–" : s === cur ? "→" : "·"} ${s.id}. ${s.title} — zrobione, gdy: ${s.doneWhen}`);
+    const lines = this.stages.map((s) => (s.status === "done" ? `✓ ${s.id}. ${s.title} — ZROBIONY (${s.doneBy ?? "zaliczony"})` : `${s === cur ? "→" : "·"} ${s.id}. ${s.title} — zrobione, gdy: ${s.doneWhen}${s.check ? " [executor sprawdza sam]" : ""}`));
     return `${lines.join("\n")}${cur ? "" : "\nWSZYSTKIE ETAPY ZROBIONE → zwróć \"done\" z raportem."}`;
   }
 
-  visit(o: Observation) {
+  visit(o: Observation, start = false) {
     this.lastObs = o;
+    if (start) {
+      this.start = { url: o.url, title: o.title };
+      return;
+    }
     if (!o.url || o.url === "about:blank") return;
     const last = this.visits.at(-1);
     if (last && pageKey(last.url) === pageKey(o.url)) {
@@ -185,11 +229,16 @@ class Trace {
 
   /** Dla decydenta: gdzie już był (z licznikami) i co zebrał. */
   memory(): string {
+    // bieżąca strona jest na liście, bo właśnie na nią trafiłeś — bez oznaczenia model czytał ją jako „już tu byłem”
+    const cur = this.lastObs ? pageKey(this.lastObs.url) : "";
+    const here = " ← TU JESTEŚ TERAZ (wynik ostatniej akcji, nie wcześniejsza wizyta)";
     const seen = [...new Map(this.visits.map((v) => [pageKey(v.url), v])).values()]
-      .map((v) => { const n = this.visitCount.get(pageKey(v.url)) ?? 1; return `- ${v.title || "(bez tytułu)"} — ${v.url}${n > 1 ? ` (×${n})` : ""}`; })
+      .map((v) => { const n = this.visitCount.get(pageKey(v.url)) ?? 1; return `- ${v.title || "(bez tytułu)"} — ${v.url}${n > 1 ? ` (×${n})` : ""}${pageKey(v.url) === cur ? here : ""}`; })
       .join("\n");
+    const startHere = !this.visits.length && this.start && this.start.url !== "about:blank";
     return [
-      seen ? `ODWIEDZONE STRONY (kolejność pierwszych wejść, ×N = ile razy):\n${seen}` : "",
+      startHere ? `STRONA STARTOWA (otwarta przed zadaniem — została po poprzednim; nie jest wynikiem tego zadania): ${this.start!.title || "(bez tytułu)"} — ${this.start!.url}` : "",
+      seen ? `STRONY W TYM ZADANIU (kolejność pierwszych wejść, ×N = ile razy):\n${seen}` : "",
       this.notes.length ? `NOTATKI, KTÓRE JUŻ ZEBRAŁEŚ (nie zbieraj ich drugi raz):\n${this.notes.map((n) => `- ${n}`).join("\n")}` : "NOTATKI: (jeszcze żadnych — zapisuj fakty polem \"note\")",
       this.loops.length ? `WYKRYTE PĘTLE (nie powtarzaj tych strategii):\n${this.loops.map((l) => `- ${l}`).join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
@@ -204,12 +253,13 @@ class Trace {
       `WYNIK: ${headline || "(brak)"}`,
       `KROKI: ${this.steps}/${this.budget}${this.lastAction ? ` · ostatni: ${this.lastAction}` : ""}`,
     ];
-    // ✓ zrobiony · – pominięty (niepotrzebny do wyniku) · ✗ niezrobiony — tylko gdy zadanie NIE skończyło się sukcesem
-    if (this.stages.length) lines.push(`PLAN (✓ zrobiony · – pominięty, bez wpływu na wynik${status === "ok" ? "" : " · ✗ niezrobiony"}):\n${this.stages.map((s) => `${s.status === "done" ? "✓" : s.status === "skipped" || status === "ok" ? "–" : "✗"} ${s.id}. ${s.title}`).join("\n")}`);
+    // ✓ zaliczony (w nawiasie: czym) · ? niepotwierdzony — zadanie zakończone bez zaliczenia etapu, nikt tego nie sprawdził · ✗ niezrobiony
+    if (this.stages.length) lines.push(`PLAN (✓ zaliczony · ? niepotwierdzony: executor zakończył bez zaliczenia tego etapu — nie wiadomo, czy zrobiony${status === "ok" ? "" : " · ✗ niezrobiony"}):\n${this.stages.map((s) => `${s.status === "done" ? "✓" : s.status === "unconfirmed" || s.status === "skipped" || status === "ok" ? "?" : "✗"} ${s.id}. ${s.title}${s.status === "done" && s.doneBy ? ` (${s.doneBy})` : ""}`).join("\n")}`);
     if (this.history.length) {
       const h = this.history.length > 20 ? [`(… ${this.history.length - 20} wcześniejszych kroków)`, ...this.history.slice(-20).map(fmtStep)] : this.history.map(fmtStep);
       lines.push(`PRZEBIEG (krok · akcja · po co · efekt):\n${h.join("\n")}`);
     }
+    if (this.start && this.start.url !== "about:blank") lines.push(`START (strona otwarta przed zadaniem, nie jest częścią wyniku): ${this.start.title || "(bez tytułu)"} — ${this.start.url}`);
     if (this.visits.length) lines.push(`ODWIEDZONE (kolejno):\n${this.visits.map((v, i) => `${i + 1}. ${v.title || "(bez tytułu)"} — ${v.url}`).join("\n")}`);
     if (this.notes.length) lines.push(`ZEBRANE PO DRODZE (surowe notatki z kolejnych kroków — przy różnicach obowiązuje WYNIK):\n${this.notes.map((n) => `- ${n}`).join("\n")}`);
     if (this.handoffs.length) lines.push(`USER: ${this.handoffs.join("; ")}`);
@@ -233,11 +283,11 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
   const trace = new Trace(o.goal, o.maxSteps, mode);
   emit("computer.started", { goal: o.goal, maxSteps: o.maxSteps, mode });
 
-  const observe = async (): Promise<Observation> => {
+  const observe = async (start = false): Promise<Observation> => {
     const obs = await browser.observe();
     const screenshotId = obs.screenshot.length ? call.screenshots.put(obs.screenshot, "image/jpeg") : undefined;
     obs.screenshotId = screenshotId;
-    trace.visit(obs);
+    trace.visit(obs, start);
     emit("computer.observation", {
       observationId: obs.observationId,
       url: obs.url,
@@ -250,7 +300,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
     return obs;
   };
   const finish = (status: ComputerStatus, headline: string): ToolResult => {
-    if (status === "ok") for (const s of trace.closeOpen()) emit("computer.stage", { id: s.id, title: s.title, status: "skipped", next: null });
+    if (status === "ok") for (const s of trace.closeOpen()) emit("computer.stage", { id: s.id, title: s.title, status: "unconfirmed", next: null });
     const text = trace.report(status, headline);
     const data = { status, steps: trace.steps, url: trace.lastObs?.url, title: trace.lastObs?.title, visited: trace.visits.map((v) => v.url), notes: trace.notes };
     if (status === "ok") emit("computer.completed", { result: headline, steps: trace.steps, url: trace.lastObs?.url, status });
@@ -263,7 +313,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
 
   let obs: Observation;
   try {
-    obs = await observe();
+    obs = await observe(true);
   } catch (e) {
     const what = browser.openApp ? "komputer" : "przeglądarka";
     trace.failures.push(`${what}: ${(e as Error).message.split("\n")[0].slice(0, 200)}`);
@@ -277,7 +327,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
     trace.stages = p.stages.map((s, i) => ({ ...s, status: i === 0 ? "doing" : "todo" }));
     budget = Math.min(o.maxSteps, step + budgetFor(p.estimatedSteps, o.maxSteps));
     trace.budget = budget;
-    emit("computer.plan", { replan, alreadyDone: p.alreadyDone, why: p.why, estimatedSteps: p.estimatedSteps, budget, cap: o.maxSteps, stages: trace.stages.map((s) => ({ id: s.id, title: s.title, doneWhen: s.doneWhen, status: s.status })) });
+    emit("computer.plan", { replan, alreadyDone: p.alreadyDone, why: p.why, estimatedSteps: p.estimatedSteps, budget, cap: o.maxSteps, stages: trace.stages.map((s) => ({ id: s.id, title: s.title, doneWhen: s.doneWhen, check: s.check, status: s.status })) });
   };
   if (o.planner) {
     try {
@@ -342,12 +392,10 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
         emit("computer.note", { text: d.note });
         lastProgress = step;
       }
-      const adv = trace.advance(d);
-      if (adv) {
-        const doneStage = adv.done;
+      const doneStage = trace.advance(d);
+      if (doneStage) {
         lastProgress = step;
         repeats.clear();
-        for (const s of adv.skipped) emit("computer.stage", { id: s.id, title: s.title, status: "skipped", next: trace.current?.id ?? null });
         emit("computer.stage", { id: doneStage.id, title: doneStage.title, status: "done", next: trace.current?.id ?? null });
         log.push(`${step}. ✓ etap ${doneStage.id} „${doneStage.title}” zrobiony${trace.current ? ` — teraz etap ${trace.current.id}` : " — wszystkie etapy zrobione → done"}`);
       }
@@ -403,6 +451,8 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
       }
 
       const before = signature(obs);
+      const prev = obs;
+      let hit: string | undefined;
       trace.steps = step;
       trace.lastAction = label;
       emit("computer.action", { step, action: d.action, label: key, think: d.think, stage: d.stage ?? trace.current?.id, expect: d.expect, status: "started" });
@@ -416,7 +466,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
             await browser.click(d.target);
             break;
           case "click_at":
-            await browser.clickAt(d.x, d.y);
+            hit = (await browser.clickAt(d.x, d.y))?.hit;
             break;
           case "hover":
             await browser.hover(d.target, d.x, d.y);
@@ -441,25 +491,39 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
             await browser.openApp(d.app);
             break;
         }
-        emit("computer.action", { step, action: d.action, label: key, status: "completed" });
       } catch (e) {
         actionError = (e as Error).message.split("\n")[0].slice(0, 280);
-        trace.failures.push(`${label}: ${actionError}`);
-        emit("computer.action", { step, action: d.action, label: key, status: "failed", error: actionError });
       }
-      if (aborted()) break;
+      if (aborted()) {
+        emit("computer.action", { step, action: d.action, label: key, status: actionError ? "failed" : "completed", error: actionError ?? undefined });
+        break;
+      }
       const visitsBefore = trace.visits.length;
       obs = await observe(); // VERIFY: nowa obserwacja, decyzja w następnej iteracji
       const changed = signature(obs) !== before;
+      const outcome = describeOutcome({ d, prev, obs, changed, actionError, hit });
+      // „brak elementu”, bo strona zdążyła przejść dalej po wcześniejszym kliknięciu = spóźniona nawigacja, nie porażka
+      const late = !!actionError && pageKey(obs.url) !== pageKey(prev.url);
+      if (actionError && !late) trace.failures.push(`${label}: ${actionError}`);
+      // jeden event po akcji, już z efektem i adresem — panel pokazuje, co akcja dała, a nie tylko, że „się wykonała”
+      emit("computer.action", { step, action: d.action, label: key, status: actionError && !late ? "failed" : "completed", error: actionError && !late ? actionError : undefined, outcome, url: obs.url });
       // nowa strona to postęp — chyba że trafiliśmy na nią, powtarzając w kółko tę samą akcję (każde losowanie = „nowa” strona)
       if (trace.visits.length > visitsBefore && repeatNo < REPEAT_LIMIT) lastProgress = step;
-      const outcome = actionError ? `BŁĄD: ${actionError}` : changed ? "ok" : "ok (strona bez zmian)";
       trace.lastAction = `${label} → ${outcome}`;
       const stageNo = d.stage ?? trace.current?.id;
       trace.history.push({ step, stage: stageNo, label, think: d.think, outcome });
       // log z intencją: model w następnym kroku wie, PO CO to zrobił, a nie tylko CO kliknął
       log.push(`${step}.${stageNo ? ` [etap ${stageNo}]` : ""} ${label}${d.think ? ` — po co: ${d.think}` : ""} → ${outcome}`);
       expect = d.expect?.trim() || undefined;
+      // etapy z warunkiem zalicza executor (tylko przeglądarka): po akcji, na świeżej obserwacji
+      if (mode === "browser") {
+        for (const s of trace.auto(obs)) {
+          lastProgress = step;
+          repeats.clear();
+          emit("computer.stage", { id: s.id, title: s.title, status: "done", auto: true, by: s.doneBy, next: trace.current?.id ?? null });
+          log.push(`${step}. ✓ etap ${s.id} „${s.title}” ZALICZONY AUTOMATYCZNIE (${s.doneBy}) — ten etap jest zrobiony; NIE powtarzaj akcji, która do niego doprowadziła${trace.current ? ` — teraz etap ${trace.current.id}` : " — wszystkie etapy zrobione → done z raportem"}`);
+        }
+      }
 
       // PĘTLA: ta sama akcja na tej samej stronie, a strona się nie zmienia (wait/scroll liczone po typie)
       const loopKey = `${pageKey(obs.url)}|${d.action === "wait" || d.action === "scroll" ? d.action : key}`;

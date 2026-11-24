@@ -67,7 +67,7 @@ function reduce(t, m) {
     case 'web.completed': task.label = `${(m.results || []).length} wyników · ${m.query || ''}`; break;
     case 'computer.started': task.name = 'computer.run'; task.goal = m.goal || ''; task.maxSteps = m.maxSteps || task.maxSteps; task.mode = m.mode || 'browser'; task.label = task.mode === 'desktop' ? 'biorę komputer' : 'otwieram przeglądarkę'; break;
     case 'computer.plan': if (m.budget) task.maxSteps = m.budget; task.label = m.alreadyDone ? 'cel już spełniony' : `plan: ${(m.stages || []).length} etap(y) · ~${m.estimatedSteps || '?'} kroków`; break;
-    case 'computer.stage': if (m.status !== 'skipped') task.label = `✓ ${m.title || `etap ${m.id}`}`; break;
+    case 'computer.stage': if (m.status === 'done') task.label = `✓ ${m.title || `etap ${m.id}`}`; break;
     case 'computer.observation': if (m.screenshotId) task.shotId = m.screenshotId; task.url = m.url || task.url; task.title = m.title || task.title; break;
     case 'computer.action': if (m.status === 'started') { task.step = m.step || task.step; task.label = m.label || ''; task.think = m.think || ''; } else if (m.status === 'failed') task.think = `błąd: ${m.error || ''}`; break;
     case 'computer.completed': task.result = m.result || task.result; task.ok = true; break;

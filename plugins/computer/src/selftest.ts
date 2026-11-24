@@ -1,6 +1,7 @@
 // SELFTEST executora computer.run — atrapa przeglądarki + skryptowany decydent, bez Playwrighta i bez API.
 // Sprawdza: raport przy anulowaniu (z wynikiem zebranym po drodze), wykrywanie pętli z opisem i zmianą strategii,
-// okrążenia X → Y → Z → X, przekazanie kontroli userowi (czekanie ≠ anulowanie).
+// okrążenia X → Y → Z → X, przekazanie kontroli userowi (czekanie ≠ anulowanie), efekt akcji (przekierowanie, spóźniona nawigacja,
+// punkt trafienia click_at), etapy zaliczane z warunku planu, strona startowa poza odwiedzonymi.
 import assert from "node:assert/strict";
 import type { AgentEvent, ToolCallContext } from "@qwe/core";
 import type { Observation } from "./browser.js";
@@ -91,7 +92,7 @@ await test("X → Y → Z → X…: powrót na odwiedzoną stronę zatrzymany po
   const r = await run(fakeBrowser(), scripted((i) => ({ action: "navigate", url: sites[(i.step - 1) % 3], note: `${sites[(i.step - 1) % 3]}: cena ${100 + ((i.step - 1) % 3)} zł` }), seen), call, 30);
   assert.ok(events.some((e) => e.type === "computer.loop" && /odwiedzone już 2×/.test(String(e.data.description))));
   const last = seen.at(-1)!;
-  assert.match(last.memory ?? "", /ODWIEDZONE STRONY/);
+  assert.match(last.memory ?? "", /STRONY W TYM ZADANIU/);
   assert.match(last.memory ?? "", /x\.pl — https:\/\/x\.pl \(×2\)/);
   assert.match(last.memory ?? "", /NOTATKI, KTÓRE JUŻ ZEBRAŁEŚ \(nie zbieraj ich drugi raz\):\n- https:\/\/x\.pl: cena 100 zł/);
   assert.equal(r.status, "partial");
@@ -167,7 +168,7 @@ await test("planner: budżet z szacunku (3 kroki → 7), a nie sztywne 30; plan 
   assert.equal(seen[1].expect, "pusta notatka");
   assert.match(seen[1].log.join("\n"), /\[etap 1\] press cmd\+n — po co: nowa notatka/);
   assert.equal(r.status, "ok");
-  assert.match(r.text, /PLAN[^\n]*:\n✓ 1\. Notatki na wierzchu\n✓ 2\. Nowa notatka/);
+  assert.match(r.text, /PLAN[^\n]*:\n✓ 1\. Notatki na wierzchu \(decydent\)\n✓ 2\. Nowa notatka \(decydent\)/);
   assert.match(r.text, /PRZEBIEG.*\n1\. \[etap 1\] press cmd\+n — nowa notatka → /);
 });
 
@@ -186,17 +187,17 @@ await test("brak postępu (open_app / cmd+tab / click_at na zmianę, jak z Brave
   assert.equal((r.data as { notes: string[] }).notes.length, 1);
 });
 
-await test("przeglądarka: etap pominięty przez decydenta → „–”, nie „✗”; status ok bez krzyżyka w PLAN; TRYB w raporcie", async () => {
+await test("przeglądarka: done bez zaliczenia etapów → „?” niepotwierdzony (nie „pominięty, niepotrzebny”), bez kaskady na wcześniejsze; TRYB w raporcie", async () => {
   const { call, events } = fakeCall();
   const seen: DeciderInput[] = [];
   const plan = normalizePlan({ estimated_steps: 2, stages: [{ title: "Etap nie do sprawdzenia", done_when: "coś, czego w przeglądarce nie widać" }, { title: "Strona otwarta", done_when: "URL to quak.com.pl" }, { title: "Stopka odczytana", done_when: "widać stopkę" }] });
   const r = await runComputerTask({ goal: "otwórz quak.com.pl", context: "", maxSteps: 20, browser: fakeBrowser(), decider: scripted((i) => (i.step === 1 ? { action: "navigate", url: "https://quak.com.pl", stage: 2 } : { action: "done", result: "Strona otwarta.", stage: 2, stage_done: true }), seen), planner: fixedPlanner([plan]), mode: "browser", call, log: () => {} });
   assert.equal(r.status, "ok");
   assert.match(r.text, /^TRYB: przeglądarka wbudowana/);
-  assert.match(r.text, /PLAN[^\n]*:\n– 1\. Etap nie do sprawdzenia\n✓ 2\. Strona otwarta\n– 3\. Stopka odczytana/);
+  assert.match(r.text, /PLAN \(✓ zaliczony · \? niepotwierdzony[^\n]*:\n\? 1\. Etap nie do sprawdzenia\n✓ 2\. Strona otwarta \(decydent\)\n\? 3\. Stopka odczytana/);
   assert.ok(!/✗/.test(r.text), r.text);
   assert.equal(events.find((e) => e.type === "computer.started")?.data.mode, "browser");
-  assert.deepEqual(events.filter((e) => e.type === "computer.stage").map((e) => `${e.data.id}:${e.data.status}`), ["1:skipped", "2:done", "3:skipped"]);
+  assert.deepEqual(events.filter((e) => e.type === "computer.stage").map((e) => `${e.data.id}:${e.data.status}`), ["2:done", "1:unconfirmed", "3:unconfirmed"]);
 });
 
 await test("desktop: zadanie nieudane → niezrobione etapy zostają „✗”; TRYB desktop", async () => {
@@ -270,6 +271,109 @@ await test("obserwacja: zasłonięty element i OVERLAY trafiają do opisu dla de
   const d = describeObservation({ url: "https://joemonster.org/", title: "JM", text: "", hints: ["OVERLAY: div.sd-cmp zasłania 100% ekranu i 36 elementów, box=[0,0,1,1]"], elements: [{ id: 262, role: "button", name: "Zaakceptuj wszystkie", inViewport: true }, { id: 1, role: "link", name: "Główna", inViewport: true, occluded: "div.sd-cmp" }], screenshot: Buffer.alloc(0), observationId: "o", at: 0 });
   assert.match(d, /HINTY: OVERLAY: div\.sd-cmp/);
   assert.match(d, /\[262\] button "Zaakceptuj wszystkie"\n\[1\] link "Główna" \(zasłonięty przez div\.sd-cmp\)/);
+});
+
+// ───────── faza 1 z design/computer-flow-review.md: decydent dostaje prawdziwe informacje ─────────
+
+await test("xkcd: navigate /random → efekt „PRZEKIEROWANO na …”, bieżąca strona „TU JESTEŚ”, event z outcome i url", async () => {
+  const { call, events } = fakeCall();
+  const seen: DeciderInput[] = [];
+  await run(randomComicBrowser(), scripted((i) => (i.step === 1 ? { action: "navigate", url: "https://c.xkcd.com/random/comic/" } : { action: "done", result: i.observation.title }), seen), call);
+  assert.match(seen[1].log.join("\n"), /1\. navigate https:\/\/c\.xkcd\.com\/random\/comic\/ → ok — PRZEKIEROWANO na https:\/\/xkcd\.com\/100\/ „xkcd: Komiks[^\n]*To JEST wynik tej akcji/);
+  assert.match(seen[1].memory ?? "", /https:\/\/xkcd\.com\/100\/ ← TU JESTEŚ TERAZ/);
+  const acts = events.filter((e) => e.type === "computer.action");
+  assert.deepEqual(acts.map((e) => e.data.status), ["started", "completed"], "jeden event po akcji, nie dwa");
+  assert.match(String(acts[1].data.outcome), /PRZEKIEROWANO na https:\/\/xkcd\.com\/100\//);
+  assert.equal(acts[1].data.url, "https://xkcd.com/100/");
+});
+
+await test("xkcd: etap z warunkiem (url_matches) zalicza executor po pierwszej akcji → decydent kończy w 1 kroku, bez drugiego losowania", async () => {
+  const { call, events } = fakeCall();
+  const seen: DeciderInput[] = [];
+  const plan = normalizePlan({ estimated_steps: 2, stages: [{ title: "Losowy komiks załadowany", done_when: "URL to xkcd.com/<numer>", check: { url_matches: "^xkcd[.]com/[0-9]+" } }] });
+  assert.deepEqual(plan.stages[0].check, { urlMatches: "^xkcd[.]com/[0-9]+" });
+  const r = await runComputerTask({ goal: "losowy komiks xkcd", context: "", maxSteps: 20, browser: randomComicBrowser(), decider: scripted((i) => (/✓ 1\./.test(i.plan ?? "") ? { action: "done", result: `Komiks: ${i.observation.url}` } : { action: "navigate", url: "https://c.xkcd.com/random/comic/" }), seen), planner: fixedPlanner([plan]), mode: "browser", call, log: () => {} });
+  assert.equal(seen.length, 2, "jedna akcja + done");
+  assert.match(seen[0].plan ?? "", /→ 1\. Losowy komiks załadowany — zrobione, gdy: [^\n]*\[executor sprawdza sam\]/);
+  assert.match(seen[1].plan ?? "", /✓ 1\. Losowy komiks załadowany — ZROBIONY \(URL xkcd\.com\/100\/\)/);
+  assert.match(seen[1].log.join("\n"), /etap 1 „Losowy komiks załadowany” ZALICZONY AUTOMATYCZNIE \(URL xkcd\.com\/100\/\)/);
+  const st = events.filter((e) => e.type === "computer.stage");
+  assert.deepEqual(st.map((e) => [e.data.id, e.data.status, e.data.auto, e.data.by]), [[1, "done", true, "URL xkcd.com/100/"]]);
+  assert.equal(r.status, "ok");
+  assert.match(r.text, /✓ 1\. Losowy komiks załadowany \(URL xkcd\.com\/100\/\)/);
+  assert.equal(trSteps(r.text), 1);
+});
+
+/** Przeglądarka, która przed zadaniem stoi na jakiejś stronie (została po poprzednim zadaniu). */
+function startedBrowser(start: string, hooks: { click?: (n: number, go: (u: string) => void) => void; clickAt?: () => { hit?: string } | void } = {}) {
+  let url = start, seq = 0, clicks = 0;
+  const b: BrowserLike = {
+    async observe(): Promise<Observation> {
+      return { url, title: `T ${url}`, text: `# ${url}`, fullText: `cały tekst ${url} Gelato THC 21%`, hints: [], elements: [{ id: 65, role: "link", name: "see all", inViewport: true }], screenshot: Buffer.alloc(0), observationId: `obs_${++seq}`, at: Date.now() };
+    },
+    async navigate(u: string) { url = u; },
+    async click() { hooks.click?.(++clicks, (u) => { url = u; }); },
+    async clickAt() { return hooks.clickAt?.(); },
+    async hover() {}, async type() {}, async press() {}, async scroll() {}, async wait() {}, async back() {},
+  };
+  return b;
+}
+
+await test("strona startowa (po poprzednim zadaniu) nie trafia do ODWIEDZONE ani do visited; warunek etapu nie zalicza się na niej przed pierwszą akcją", async () => {
+  const { call } = fakeCall();
+  const seen: DeciderInput[] = [];
+  const plan = normalizePlan({ estimated_steps: 2, stages: [{ title: "Komiks", done_when: "xkcd", check: { url_contains: "xkcd.com" } }, { title: "Leafly", done_when: "leafly", check: { url_contains: "https://www.leafly.com", text_contains: "gelato" } }] });
+  const r = await runComputerTask({ goal: "leafly", context: "", maxSteps: 20, browser: startedBrowser("https://xkcd.com/309/"), decider: scripted((i) => (i.step === 1 ? { action: "navigate", url: "https://www.leafly.com/" } : { action: "done", result: "leafly" }), seen), planner: fixedPlanner([plan]), mode: "browser", call, log: () => {} });
+  assert.match(seen[0].plan ?? "", /→ 1\. Komiks/, "etap prawdziwy już na starcie NIE jest zaliczony bez akcji");
+  assert.match(seen[0].memory ?? "", /STRONA STARTOWA \(otwarta przed zadaniem[^\n]*xkcd\.com\/309/);
+  assert.match(r.text, /START \(strona otwarta przed zadaniem, nie jest częścią wyniku\): T https:\/\/xkcd\.com\/309\/ — https:\/\/xkcd\.com\/309\//);
+  assert.match(r.text, /ODWIEDZONE \(kolejno\):\n1\. T https:\/\/www\.leafly\.com\/ — https:\/\/www\.leafly\.com\/\n/);
+  assert.deepEqual((r.data as { visited: string[] }).visited, ["https://www.leafly.com/"]);
+  // warunek z url_contains (z protokołem i www — normalizowany) + text_contains w pełnym tekście strony
+  assert.match(r.text, /\? 1\. Komiks\n✓ 2\. Leafly \(URL leafly\.com\/, tekst „gelato”\)/);
+});
+
+await test("leafly: klik z błędem „brak elementu”, gdy strona zdążyła przejść dalej → „NIE WYKONANO … wcześniejsza akcja zadziałała z opóźnieniem”, nie porażka", async () => {
+  const { call, events } = fakeCall();
+  const seen: DeciderInput[] = [];
+  // 1. klik: nic (SPA jeszcze nie przeszło) · 2. klik: strona już inna → brak elementu
+  const b = startedBrowser("https://www.leafly.com/strains/lists", { click: (n, go) => { if (n === 2) { go("https://www.leafly.com/strains"); throw new Error("brak elementu [65] — zrób observe"); } } });
+  const r = await run(b, scripted((i) => (i.step <= 2 ? { action: "click", target: 65 } : { action: "done", result: "ok" }), seen), call);
+  assert.match(seen[1].log.join("\n"), /1\. click \[65\] „see all” \(link\) → bez zmian \(ten sam adres i ta sama treść\)/);
+  assert.match(seen[2].log.join("\n"), /2\. click \[65\][^\n]*→ NIE WYKONANO \(brak elementu \[65\][^\n]*strona w międzyczasie przeszła na https:\/\/www\.leafly\.com\/strains /);
+  assert.ok(!/NIE ZADZIAŁAŁO/.test(r.text), "spóźniona nawigacja nie ląduje w NIE ZADZIAŁAŁO");
+  assert.deepEqual(events.filter((e) => e.type === "computer.action" && e.data.status !== "started").map((e) => e.data.status), ["completed", "completed"]);
+});
+
+await test("click_at: efekt mówi, w co trafił klik („NIC KLIKALNEGO”), a prawdziwy błąd akcji dalej jest porażką", async () => {
+  const { call, events } = fakeCall();
+  const seen: DeciderInput[] = [];
+  const b = startedBrowser("https://joemonster.org/", { clickAt: () => ({ hit: "div.wrap — NIC KLIKALNEGO w tym punkcie" }), click: () => { throw new Error("klik zasłonięty — <div id=\"ad\"> przechwytuje kliknięcie"); } });
+  const r = await run(b, scripted((i) => (i.step === 1 ? { action: "click_at", x: 0.99, y: 0.03 } : i.step === 2 ? { action: "click", target: 65 } : { action: "done", result: "x" }), seen), call);
+  assert.match(seen[1].log.join("\n"), /1\. click_at \(0\.99, 0\.03\) → bez zmian \(ten sam adres i ta sama treść\) · trafiono w: div\.wrap — NIC KLIKALNEGO/);
+  assert.match(String(events.filter((e) => e.type === "computer.action")[1].data.outcome), /trafiono w: div\.wrap/);
+  assert.match(r.text, /NIE ZADZIAŁAŁO:\n- click \[65\] „see all” \(link\): klik zasłonięty/);
+  assert.equal(events.filter((e) => e.type === "computer.action" && e.data.status === "failed").length, 1);
+});
+
+await test("warunki etapów: normalizacja odpowiedzi plannera i porównywanie (URL bez protokołu/www, zły regex odpada, wszystkie pola naraz)", async () => {
+  const { checkStage, bareUrl } = await import("./planner.js");
+  assert.equal(bareUrl("https://WWW.Leafly.com/Strains/Gelato?x=1"), "leafly.com/Strains/Gelato?x=1");
+  const p = normalizePlan({ stages: [{ title: "A", check: { url_matches: "([", text_contains: "  " } }, { title: "B", check: { url_contains: "leafly.com/strains/gelato", text_contains: "THC" } }, { title: "C" }] });
+  assert.equal(p.stages[0].check, undefined, "niekompilujący się regex i pusty tekst → brak warunku");
+  assert.equal(p.stages[2].check, undefined);
+  const o = { url: "https://www.leafly.com/strains/gelato", title: "Gelato", text: "menu", fullText: "menu … thc 21% …" };
+  assert.equal(checkStage(p.stages[1].check, o), "URL leafly.com/strains/gelato, tekst „THC”");
+  assert.equal(checkStage(p.stages[1].check, { ...o, fullText: "bez tego słowa" }), null, "jedno pole nie pasuje → warunek niespełniony");
+  assert.equal(checkStage({ titleContains: "gelato" }, o), "tytuł „Gelato”");
+  assert.equal(checkStage(undefined, o), null);
+});
+
+await test("desktop: warunków etapów executor nie zalicza sam (zakres fazy 1 to przeglądarka)", async () => {
+  const { call, events } = fakeCall();
+  const plan = normalizePlan({ estimated_steps: 2, stages: [{ title: "Okno", done_when: "x", check: { url_contains: "leafly" } }] });
+  await runComputerTask({ goal: "x", context: "", maxSteps: 20, browser: { ...startedBrowser("app://finder"), openApp: async () => {} }, decider: scripted((i) => (i.step === 1 ? { action: "navigate", url: "https://www.leafly.com/" } : { action: "done", result: "x" })), planner: fixedPlanner([plan]), mode: "desktop", call, log: () => {} });
+  assert.deepEqual(events.filter((e) => e.type === "computer.stage").map((e) => e.data.status), ["unconfirmed"]);
 });
 
 function trSteps(t: string) { return Number(/KROKI: (\d+)/.exec(t)?.[1] ?? 99); }

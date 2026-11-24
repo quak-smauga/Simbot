@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --conditions=development src/selftest.ts"
+    "test": "tsx --conditions=development src/selftest.ts",
+    "test:browser": "tsx --conditions=development src/browsertest.ts"
   },
   "dependencies": {
     "@qwe/core": "workspace:*",

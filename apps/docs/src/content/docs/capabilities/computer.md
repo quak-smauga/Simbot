@@ -57,12 +57,34 @@ flowchart TB
 ```
 
 - **Obserwacja** (przeglądarka): elementy `[N]` z DOM + tekst + hinty + screenshot. DOM, jeśli możliwe; vision (`QWE_COMPUTER_VISION=1`, domyślnie włączone), jeśli potrzebne.
+  - **Tekst idzie za widokiem**: `Observation.text` to treść, która jest teraz na ekranie (nagłówek `(widok: ekran 2 z 9)`), plus nagłówki spod widoku jako spis (`NIŻEJ NA STRONIE`). Po `scroll` tekst jest inny. Strona z samych `div`/`span` → węzły tekstowe z widoku. `Observation.fullText` (cały `innerText`, do 120 tys. znaków) zostaje w executorze do sprawdzania warunków etapów i **nie idzie do modelu**.
+  - **Lista elementów** ma limit 70; gdy jest ucięta → hint `ELEMENTS_TRUNCATED: lista ma 70 z N`. Przycisk albo link z samą ikoną (bez tekstu) dostaje nazwę opisową: `(ikona: close — góra, prawo)`.
   - Obrazek: nazwa = `alt`, atrybut `title` osobno jako `dymek(title)` (pole `PageElement.tooltip`) — tam strony trzymają tekst pokazywany po najechaniu, np. żart „alt text” na xkcd.
-  - **Zasłonięcie**: dla widocznych elementów `elementFromPoint` w środku — jeśli klik dostałoby coś innego, element ma `(zasłonięty przez div.x)` (pole `PageElement.occluded`) i ląduje na liście za niezasłoniętymi. Warstwa zasłaniająca ≥ 25% ekranu (najwyższy przodek z `position: fixed`) → hint `OVERLAY: … zasłania N% ekranu i M elementów, box=[…]`.
+  - **Zasłonięcie**: dla widocznych elementów `elementFromPoint` w środku — jeśli klik dostałoby coś innego, element ma `(zasłonięty przez div.x)` (pole `PageElement.occluded`) i ląduje na liście za niezasłoniętymi. Nakładką może być tylko **warstwa** (`fixed`, `sticky`, `dialog`, `aria-modal`); zwykła treść leżąca na elemencie to nie nakładka. Powierzchnię warstwy mierzy **próbkowanie siatką 12×9 punktów** (`elementFromPoint`), a nie prostokąt kontenera — przezroczysty kontener `fixed` na cały ekran z paskiem reklamy na dole to pasek. Warstwy liczone razem (tło + okienko zgód to jedna nakładka):
+    - razem ≥ 40% ekranu albo któraś jest dialogiem → `OVERLAY: … zasłania N% ekranu i M elementów, box=[…]` (zamknij przed kliknięciem),
+    - mniej → `STICKY_BANNER: … to pasek na N% ekranu, box=[…]` (nie trzeba zamykać).
+  - **CAPTCHA_SUSPECTED** tylko przy widocznym widżecie (iframe reCAPTCHA / hCaptcha / Turnstile w widoku, ≥ 40×40 px) albo stronie-bramce („nie jestem robotem”, „Just a moment…”). Samo słowo w HTML, ukryty widżet i plakietka reCAPTCHA v3 nie wystarczą.
   - **Błąd kliku**: z logu Playwrighta wyciągany jest powód („`<div …>` intercepts pointer events” → „klik zasłonięty — `<div …>` przechwytuje kliknięcie”), zamiast samego „Timeout”.
+- **Efekt akcji**: po każdej akcji executor porównuje stan przed i po i mówi wprost, co wyszło — decydentowi w logu, w raporcie i w evencie `computer.action` (`outcome`, `url`):
+
+  | Sytuacja | Efekt |
+  |---|---|
+  | `navigate X`, adres po akcji ≠ X | `ok — PRZEKIEROWANO na Y „tytuł”. To JEST wynik tej akcji` |
+  | nowy adres po kliku | `ok — nowa strona: Y „tytuł”` |
+  | ten sam adres, inna treść albo widok | `ok — ta sama strona, widok albo treść się zmieniły` |
+  | nic się nie zmieniło | `bez zmian (ten sam adres i ta sama treść)` |
+  | błąd akcji, a strona w międzyczasie przeszła dalej | `NIE WYKONANO (…) — wcześniejsza akcja zadziałała z opóźnieniem` (nie liczy się jako porażka) |
+  | `click_at` | dopisek `trafiono w: a.close „Zamknij x”` / `iframe#ad — ramka` / `div — NIC KLIKALNEGO w tym punkcie` |
+
+- **Czekanie po kliku w link**: jeśli klikany element jest linkiem pod inny adres, `click` czeka do 3 s na zmianę adresu (SPA zmienia go z opóźnieniem), zanim zrobi obserwację.
+- **Pamięć taska**: bieżąca strona ma dopisek `← TU JESTEŚ TERAZ`; strona, na której przeglądarka stała przed zadaniem, to `STRONA STARTOWA` / `START` w raporcie i nie trafia do `ODWIEDZONE`.
 - **Najpierw zrzut**: decydent przed wyborem `[N]` patrzy na zrzut — reklama, modal albo baner nad stroną → najpierw zamknięcie (przycisk z listy albo `click_at` w X, bo reklamy w iframe nie mają `[N]`); treści jeszcze nie widać → `wait`.
 - **Planner** (`planner.ts`): przed pętlą i przy braku postępu (replan), osobny prompt na tryb. Przykład (desktop): „wejdź do nowej karty w Brave”, a karta już jest na ekranie → koniec w kroku 0.
-- **Etapy planu**: `todo` → `doing` → `done` albo `skipped`. Decydent zalicza etap polem `stage_done`; wcześniejsze, wciąż otwarte etapy stają się `skipped` (poszedł dalej bez nich). Przy zakończeniu `ok` wszystko, co zostało otwarte, też jest `skipped`. Event `computer.stage` niesie `status: done | skipped`.
+- **Etapy planu**: `todo` → `doing` → `done`. Etap zalicza się na dwa sposoby:
+  - **executor sam** (tylko przeglądarka), gdy planner dał etapowi warunek `check` — `url_contains`, `url_matches` (regex), `title_contains`, `text_contains`; wszystkie podane pola muszą pasować. Adres porównywany bez protokołu i `www.`, tekst w całym `fullText` bez rozróżniania wielkości liter. Sprawdzany po każdej akcji (nigdy na obserwacji startowej). Event `computer.stage` ma wtedy `auto: true` i `by` (np. `URL xkcd.com/1773/`), a decydent dostaje w logu „✓ etap N … ZALICZONY AUTOMATYCZNIE”,
+  - **decydent** polem `stage_done` (etapy bez `check`).
+
+  Zaliczenie etapu nie rusza wcześniejszych: zostają otwarte. Przy zakończeniu `done` etapy, których nikt nie zaliczył, dostają status `unconfirmed` (`?` w raporcie) — to znaczy „nie wiadomo, czy zrobiony”, a nie „niepotrzebny”. Statusu `skipped` executor już nie nadaje (zostaje w starych zapisach rozmów).
 - **Budżet kroków** z szacunku plannera; `QWE_COMPUTER_MAX_STEPS` (25) to tylko twardy limit.
 - **Ochrona przed pętlą** (`computer.loop`) → zmiana strategii, po 3 pętlach koniec jako `partial`:
   - ta sama akcja 3× bez zmiany strony,
@@ -93,7 +115,9 @@ Wznów = zgoda na wznowienie; runtime robi nową obserwację i sam sprawdza stan
 Każde zakończenie wraca do sima jako pełny raport: tryb, odwiedzone strony po kolei, kroki, notatki, przekazania kontroli, co nie zadziałało, ostatni widok. Sim nie dostaje samego „anulowano”, kiedy zadanie w połowie się udało.
 
 - `TRYB` — pierwsza linia: przeglądarka wbudowana albo desktop.
-- `PLAN` — `✓` zrobiony · `–` pominięty (bez wpływu na wynik) · `✗` niezrobiony. `✗` pojawia się **tylko** przy statusie innym niż `ok`; raport `ok` nigdy nie ma krzyżyka.
+- `PLAN` — `✓` zaliczony (w nawiasie czym: `URL …` albo `decydent`) · `?` niepotwierdzony (zadanie zakończone bez zaliczenia etapu) · `✗` niezrobiony. `✗` pojawia się **tylko** przy statusie innym niż `ok`.
+- `START` — strona otwarta przed zadaniem (po poprzednim); nie jest częścią wyniku.
+- `PRZEBIEG` — każdy krok z efektem akcji (patrz wyżej).
 - `ZEBRANE PO DRODZE` — surowe notatki z kolejnych kroków; przy różnicach obowiązuje `WYNIK`.
 
 Statusy (`ToolResult.status`): `ok` · `partial` (limit kroków / pętla, ale coś zebrane) · `cancelled_by_user` · `failed`. Czekanie na usera **nie** kończy zadania.

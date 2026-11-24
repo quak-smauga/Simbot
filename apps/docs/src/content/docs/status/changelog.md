@@ -7,6 +7,19 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-24 — computer: decydent dostaje prawdziwe informacje (faza 1)
+
+Tło i dowody: `design/computer-flow.md` + `design/computer-flow-review.md` (trzy zadania testowe: joemonster, xkcd, leafly).
+
+- **OVERLAY mierzony próbkowaniem** (siatka 12×9, `elementFromPoint`), tylko dla warstw `fixed` / `sticky` / dialog; mały pasek to nowy hint `STICKY_BANNER`. Poprzednia wersja (2026-11-20) liczyła prostokąt kontenera: po zamknięciu reklamy na joemonster.org dalej zgłaszała „zasłania 99% ekranu” i decydent 4× klikał w miejsce po X.
+- **Efekt akcji**: `computer.action` po akcji to jeden event z `outcome` i `url` (wcześniej `completed` szedł przed obserwacją, bez efektu). Przekierowanie jest nazwane wprost — na xkcd `/random` decydent 3× losował, bo widział „→ ok” i inny adres niż wpisany. `click_at` zwraca, w co trafił.
+- **Etapy**: nowe pole `check` w planie (`Stage.check`) — executor zalicza etap sam z adresu / tytułu / tekstu (`computer.stage` z `auto`, `by`). Status `skipped` zastąpiony przez `unconfirmed`; koniec kaskady „wcześniejsze etapy = pominięte”.
+- **Tekst obserwacji** to treść w widoku (zmienia się po przewinięciu), nie pierwsze 1800 znaków dokumentu; `Observation.fullText` dla executora; hint `ELEMENTS_TRUNCATED`; ikony bez tekstu na liście elementów.
+- `CAPTCHA_SUSPECTED` tylko przy widocznym widżecie; `click` w link czeka na zmianę adresu (SPA); strona startowa poza `ODWIEDZONE`, bieżąca oznaczona „TU JESTEŚ TERAZ”.
+- Chat zapisuje `computer.plan`, `computer.stage` i `computer.resumed` — plan i etapy są w panelu także po przeładowaniu rozmowy.
+- Nowy test na prawdziwej przeglądarce: `pnpm --filter @qwe/plugin-computer test:browser`.
+- Strony docsów: [Computer](/capabilities/computer/), [Eventy](/events/), [Testy](/development/testing/), [UI](/components/ui/).
+
 ## 2026-11-20 — computer: nakładki i najpierw zrzut
 
 - Obserwacja wykrywa zasłonięcie: `PageElement.occluded` („zasłonięty przez div.x”) i hint `OVERLAY` z ramką warstwy. Powód: na joemonster.org decydent 4× klikał link pod pełnoekranową reklamą / banerem zgód, bo lista elementów pokazywała go jako widoczny.
