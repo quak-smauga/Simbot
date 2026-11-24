@@ -19,7 +19,7 @@ UI to statyczne pliki serwowane przez chat — **vanilla JS, ES modules, bez bun
 |---|---|
 | `app.js` | Główny widok: sidebar (simy + rozmowy), wątek, composer z `@`, panel work (desktop), głos, lobby WS. |
 | `widget.js` / `widget.css` | Widget Electrona: kropka ↔ karta, stany, sterowanie zadaniem. Entry: `widget.html`. |
-| `cards.js` | Karty zadań w wątku (kompaktowy wiersz + szczegóły; na desktopie szczegóły w panelu obok). Model karty z eventów `task.*`, `plan.*`, `step.*`, `tool.*`, `web.*`, `computer.*`. |
+| `cards.js` | Karty zadań w wątku: skończone kroki (✓ + czas, ostatnie 3) i pod nimi bieżący jako shimmer z licznikiem; po końcu jedna linia podsumowania. Klik → szczegóły (desktop: panel obok, mobile: inline). Panel otwiera się sam tylko przy `task.waiting`. Eksportuje też `shimmer()` — `app.js` używa go do zaślepki „myśli…” pod simem przy `agent.state: thinking`, którą pierwsza delta `say.text` zamienia w odpowiedź. Model karty z eventów `task.*`, `plan.*`, `step.*`, `tool.*`, `web.*`, `computer.*`. |
 | `sims.js` | Dodawanie sima i strona sima: kim jest, co umie, jak pracuje (skille), co pamięta. |
 | `pages.js` | Onboarding usera, workflowy (lista + edytor), puste stany. |
 | `builder.js` / `avatar.js` | Konstruktor awatara i render awatara (kształt, oczy, usta, akcesoria, wzór, animacja). |

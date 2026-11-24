@@ -5,6 +5,16 @@ import { icon } from './icons.js';
 const esc = s => String(s ?? '').replace(/\x1b\[[0-9;]*m/g, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 /** czas: 820ms · 2,4 s · 1:09 · 1:02:05 (powyżej minuty zegar, nie „69431,2 s”) */
 const ms = n => { if (n == null) return ''; if (n < 1000) return `${n}ms`; if (n < 60000) return `${(n / 1000).toFixed(1).replace('.', ',')} s`; const s = Math.floor(n / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`; };
+/** czas zdarzenia: `at` z eventu (historia), inaczej teraz */
+const ts = e => (e && e.at && Date.parse(e.at)) || Date.now();
+/** licznik „ile już trwa” pod shimmerem: pusty przez pierwsze 3 s, potem 4 s · 1:05 */
+const since = n => { const s = Math.floor(n / 1000); return s < 3 ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const SHIM_MS = 1800;
+/** Shimmer: tekst z przelatującym błyskiem + licznik. Ujemne opóźnienie = animacja ciągnie się dalej mimo przerysowania innerHTML. */
+export const shimmer = (text, from) => `<span class="shim" style="animation-delay:-${Date.now() % SHIM_MS}ms">${esc(text)}</span><span class="tst__t" data-since="${from || Date.now()}">${since(Date.now() - (from || Date.now()))}</span>`;
+setInterval(() => { const now = Date.now(); document.querySelectorAll('[data-since]').forEach(el => { el.textContent = since(now - Number(el.dataset.since)); }); }, 500);
+const plural = n => (n === 1 ? 'krok' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'kroki' : 'kroków');
+const argOf = a => (a && (a._ || a.query || a.task || a.goal)) || '';
 const STATE_PL = { queued: 'w kolejce', running: 'pracuje', waiting_user: 'czeka na Ciebie', paused: 'pauza', succeeded: 'gotowe', failed: 'błąd', cancelled: 'anulowane', pending: 'budzę agenta' };
 const STEP_PL = { pending: '·', running: '…', completed: '✓', failed: '✗', skipped: '–', waiting_user: '⏸' };
 const REASON_PL = { LOGIN_REQUIRED: '🔐 Zaloguj się', CONFIRM_ACTION: '⚠️ Potwierdź', CAPTCHA: '🧩 Captcha', USER_CONTROL: '🖱 Masz kontrolę', OTHER: '✋ Potrzebna pomoc' };
@@ -32,7 +42,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
   document.addEventListener('click', e => {
     const b = e.target.closest('[data-op]');
     if (b && b.dataset.task) { e.preventDefault(); onControl(b.dataset.op, b.dataset.task); return; }
-    const row = e.target.closest('.trow');
+    const row = e.target.closest('.tsteps');
     if (row) {
       const card = [...cards.values(), ...locals].find(c => c.el === row.parentElement) || (pending && pending.el === row.parentElement ? pending : null);
       if (!card) return;
@@ -40,6 +50,8 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
       if (!card.local) focus(card, true);
     }
   });
+
+  document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('tsteps')) { e.preventDefault(); e.target.click(); } });
 
   function newCard() {
     const el = document.createElement('div');
@@ -49,7 +61,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
   }
   function toolFor(card, key, name) {
     let t = card.tools.get(key);
-    if (!t) { t = { key, name, status: 'running', log: [], shots: [], results: null, progress: null, result: null, ok: null, goal: null, query: null, url: null, title: null }; card.tools.set(key, t); card.order.push(key); }
+    if (!t) { t = { key, name, at: Date.now(), status: 'running', log: [], shots: [], results: null, progress: null, result: null, ok: null, goal: null, query: null, url: null, title: null }; card.tools.set(key, t); card.order.push(key); }
     return t;
   }
   const key = e => e.stepId || e.name;
@@ -93,30 +105,30 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
     if (!card) { card = newCard(); card.taskId = e.taskId; cards.set(e.taskId, card); }
     switch (type) {
       case 'task.started': card.state = 'running'; card.startedAt = e.at ? Date.parse(e.at) : Date.now(); break;
-      case 'task.waiting': card.state = 'waiting_user'; card.waiting = { reason: e.reason, message: e.message, screenshotId: e.screenshotId, url: e.url, action: e.action, details: e.details }; focus(card); break;
-      case 'task.resumed': card.state = 'running'; card.waiting = null; break;
+      case 'task.waiting': card.state = 'waiting_user'; card.waiting = { reason: e.reason, message: e.message, screenshotId: e.screenshotId, url: e.url, action: e.action, details: e.details }; if (!card.el.classList.contains('open')) { card.el.classList.add('open'); card.autoOpen = true; } focus(card, 'ask'); break;
+      case 'task.resumed': card.state = 'running'; card.waiting = null; if (card.autoOpen) { card.el.classList.remove('open'); card.autoOpen = false; } break;
       case 'task.paused': card.state = 'paused'; break;
-      case 'task.succeeded': card.state = e.ok === false ? 'failed' : 'succeeded'; card.parts = e.parts || []; card.waiting = null; card.ms = Date.now() - card.startedAt; break;
+      case 'task.succeeded': card.state = e.ok === false ? 'failed' : 'succeeded'; card.parts = e.parts || []; card.waiting = null; card.ms = ts(e) - card.startedAt; break;
       case 'task.failed': card.state = 'failed'; card.error = e.error; card.waiting = null; break;
       case 'task.cancelled': card.state = 'cancelled'; card.waiting = null; break;
       case 'plan.started': card.kind = 'plan'; card.steps = (e.steps || []).map(s => ({ ...s, status: 'pending', args: (card.steps.find(x => x.id === s.id) || {}).args })); break;
       case 'step.started': { const s = card.steps.find(x => x.id === e.stepId) || (card.steps.push({ id: e.stepId, name: e.name, after: [] }), card.steps.at(-1)); s.status = 'running'; s.args = e.args || s.args; break; }
       case 'step.completed': case 'step.failed': case 'step.skipped': { const s = card.steps.find(x => x.id === e.stepId); if (s) { s.status = type.split('.')[1]; s.ms = e.ms; s.error = e.error; } break; }
-      case 'tool.call': { const t = toolFor(card, key(e), e.name); t.args = e.args; t.status = 'running'; break; }
+      case 'tool.call': { const t = toolFor(card, key(e), e.name); t.args = e.args; t.status = 'running'; t.at = ts(e); break; }
       case 'tool.result': { const t = toolFor(card, key(e), e.name); t.status = e.ok ? 'completed' : 'failed'; t.ok = e.ok; t.ms = e.ms; if (e.error) t.log.push({ err: e.error }); break; }
       case 'web.started': { const t = toolFor(card, key({ ...e, name: 'web.query' }), 'web.query'); t.query = e.query; t.progress = 'szukam…'; break; }
       case 'web.progress': { const t = toolFor(card, key({ ...e, name: 'web.query' }), 'web.query'); t.progress = e.message; break; }
       case 'web.completed': { const t = toolFor(card, key({ ...e, name: 'web.query' }), 'web.query'); t.results = e.results || []; t.progress = `${e.provider} · ${ms(e.ms)}`; break; }
       case 'computer.started': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.goal = e.goal; t.mode = e.mode; break; }
       case 'computer.observation': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.url = e.url; t.title = e.title; if (e.screenshotId) { t.shots.push({ id: e.screenshotId, url: e.url, title: e.title }); if (t.shots.length > 12) t.shots.shift(); } break; }
-      case 'computer.action': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); const last = t.log.at(-1); if (last && last.step === e.step && last.label === e.label) { last.status = e.status; last.error = e.error; } else t.log.push({ step: e.step, label: e.label, status: e.status, error: e.error, think: e.think }); if (t.log.length > 40) t.log.shift(); break; }
+      case 'computer.action': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); const last = t.log.at(-1); if (last && last.step === e.step && last.label === e.label) { last.status = e.status; last.error = e.error; } else t.log.push({ step: e.step, label: e.label, status: e.status, error: e.error, think: e.think, at: ts(e) }); if (t.log.length > 40) t.log.shift(); break; }
       case 'computer.completed': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = e.result; t.ok = true; break; }
       case 'computer.failed': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = e.error; t.ok = false; break; }
       case 'computer.cancelled': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = 'anulowane przez Ciebie — sim dostał raport z tego, co zdążył zrobić'; t.ok = false; break; }
-      case 'computer.note': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.log.push({ label: `📝 ${e.text}`, status: 'completed' }); if (t.log.length > 40) t.log.shift(); break; }
-      case 'computer.plan': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.plan = { stages: e.stages || [], budget: e.budget, est: e.estimatedSteps }; t.log.push({ label: e.alreadyDone ? '🧭 cel już spełniony na ekranie — nic do klikania' : `🧭 ${e.replan ? 'nowy plan' : 'plan'}: ${(e.stages || []).length} etap(y) · ~${e.estimatedSteps} kroków (limit ${e.budget})${e.why ? ` — ${e.why}` : ''}`, status: 'completed' }); break; }
-      case 'computer.stage': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); const skip = e.status === 'skipped'; const st = t.plan?.stages.find(x => x.id === e.id); if (st) st.status = skip ? 'skipped' : 'done'; const nx = t.plan?.stages.find(x => x.id === e.next); if (nx) nx.status = 'doing'; t.log.push({ label: skip ? `– etap ${e.id} pominięty (niepotrzebny): ${e.title}` : `✓ etap ${e.id}: ${e.title}`, status: 'completed' }); break; }
-      case 'computer.loop': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.log.push({ label: `🔁 ${e.description}${e.strategyChange ? ' — zmieniam strategię' : ''}`, status: 'failed', error: 'pętla' }); break; }
+      case 'computer.note': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.log.push({ label: `📝 ${e.text}`, status: 'completed', at: ts(e) }); if (t.log.length > 40) t.log.shift(); break; }
+      case 'computer.plan': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.plan = { stages: e.stages || [], budget: e.budget, est: e.estimatedSteps }; t.log.push({ label: e.alreadyDone ? '🧭 cel już spełniony na ekranie — nic do klikania' : `🧭 ${e.replan ? 'nowy plan' : 'plan'}: ${(e.stages || []).length} etap(y) · ~${e.estimatedSteps} kroków (limit ${e.budget})${e.why ? ` — ${e.why}` : ''}`, status: 'completed', at: ts(e) }); break; }
+      case 'computer.stage': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); const skip = e.status === 'skipped'; const st = t.plan?.stages.find(x => x.id === e.id); if (st) st.status = skip ? 'skipped' : 'done'; const nx = t.plan?.stages.find(x => x.id === e.next); if (nx) nx.status = 'doing'; t.log.push({ label: skip ? `– etap ${e.id} pominięty (niepotrzebny): ${e.title}` : `✓ etap ${e.id}: ${e.title}`, status: 'completed', at: ts(e) }); break; }
+      case 'computer.loop': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.log.push({ label: `🔁 ${e.description}${e.strategyChange ? ' — zmieniam strategię' : ''}`, status: 'failed', error: 'pętla', at: ts(e) }); break; }
       default:
         if (type.startsWith('plan.')) break;
         { const t = toolFor(card, key({ ...e, name: e.name || type.split('.')[0] + '.*' }), e.name || type); t.log.push({ label: `${type}` }); }
@@ -152,13 +164,64 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
     return arg || STATE_PL[card.state] || '';
   }
 
-  function render(card) {
+  /** Kroki karty jako linie: { label, bad, skipped, ms | at+end }. computer.run rozpisany na akcje z logu. */
+  function linesOf(card) {
+    const toolLines = (t, label) => {
+      if (t && t.name === 'computer.run' && t.log.length) return t.log.map((a, i) => ({ label: a.err || a.label, bad: !!a.err || a.status === 'failed', at: a.at, end: t.log[i + 1] && t.log[i + 1].at }));
+      if (t && t.name === 'web.query') return [{ label: t.results ? `${t.query} · ${t.results.length} wyn.` : `szukam: ${t.query || argOf(t.args)}`, ms: t.ms, at: t.at }];
+      return [{ label, ms: t && t.ms, at: t && t.at, bad: !!t && t.ok === false }];
+    };
+    const L = [];
+    if (card.kind === 'plan') {
+      for (const s of card.steps) {
+        if (s.status === 'pending') continue;
+        const t = s.id ? card.tools.get(s.id) : null;
+        const arg = argOf(s.args) || (t && (t.goal || t.query)) || '';
+        if (s.status === 'running' && t && t.name === 'computer.run' && t.log.length) L.push(...toolLines(t));
+        else L.push({ label: `${kindName(s.name, s.args, t)}${arg ? `: ${arg}` : ''}`, ms: s.ms, bad: s.status === 'failed', skipped: s.status === 'skipped' });
+      }
+    } else {
+      const tools = [...card.tools.values()];
+      if (tools.length) for (const t of tools) { const arg = argOf(t.args) || t.goal || ''; L.push(...toolLines(t, `${kindName(t.name, t.args, t)}${arg ? `: ${arg}` : ''}`)); }
+      else for (const c of card.calls) { const arg = argOf(c.args); L.push({ label: `${kindName(c.name, c.args)}${arg ? `: ${arg}` : ''}` }); }
+    }
+    return L;
+  }
+  const MAX_DONE = 3;
+  const row = (cls, ic, label, t = '', extra = '') => `<div class="tst ${cls}"><span class="tst__ic">${ic}</span><span class="tst__l">${esc(label)}</span>${t ? `<span class="tst__t">${t}</span>` : ''}${extra}</div>`;
+  const nowRow = (card, label, from, extra) => { const fresh = label !== card.lastNow; card.lastNow = label; return `<div class="tst tst--now${fresh ? ' tst--in' : ''}"><span class="tst__ic"><i></i></span>${shimmer(label, from)}${extra}</div>`; };
+  /** W wątku: skończone kroki (✓ + czas, ostatnie 3) i pod nimi bieżący jako shimmer. Po zakończeniu — jedna linia podsumowania. */
+  function stepsHtml(card) {
+    const chev = `<span class="tst__chev">${icon('chevron-right', 14)}</span>`;
     const t = mainTool(card);
     const shot = t && t.shots && t.shots.at(-1);
-    const chev = `<span class="trow__chev">${icon('chevron-right', 16)}</span>`;
-    card.el.innerHTML = `<button class="trow" data-s="${card.state}"><i></i><span class="trow__bot"></span><span class="trow__kind">${esc(kindOf(card))}</span><span class="trow__label">${esc(labelOf(card))}</span>${shot ? `<img class="trow__thumb" src="${shotUrl(shot.id)}" alt="" />` : ''}<span class="trow__ms">${card.ms != null ? ms(card.ms) : ''}</span>${chev}</button><div class="tdet"><div><div class="full">${fullHtml(card)}</div></div></div>`;
-    // lokalna karta: postać „myśli” w wierszu, dopóki szuka
-    if (card.bot && avatarFor) { const a = avatarFor(card.bot, 20, card.local ? (['running', 'pending'].includes(card.state) ? 'thinking' : 'idle') : undefined); if (a) card.el.querySelector('.trow__bot').append(a); }
+    const thumb = shot ? `<img class="tst__thumb" src="${shotUrl(shot.id)}" alt="" />` : '';
+    const ended = ['succeeded', 'failed', 'cancelled'].includes(card.state);
+    if (card.local) {
+      if (!ended) return nowRow(card, `przypominam sobie: ${labelOf(card)}`, card.startedAt, chev);
+      return row(`tst--end tst--${card.state}`, card.state === 'succeeded' ? '✓' : '✗', `przypominam sobie · ${labelOf(card)}`, '', chev);
+    }
+    const L = linesOf(card);
+    if (ended) {
+      const n = L.length;
+      const txt = card.state === 'succeeded' ? `${kindOf(card)}${n > 1 ? ` · ${n} ${plural(n)}` : ''}` : card.state === 'failed' ? `${kindOf(card)} · ${card.error || (t && t.result) || 'błąd'}` : `${kindOf(card)} · anulowane`;
+      return row(`tst--end tst--${card.state}`, card.state === 'succeeded' ? '✓' : card.state === 'failed' ? '✗' : '–', txt, card.ms != null ? ms(card.ms) : '', thumb + chev);
+    }
+    const stopped = card.state === 'waiting_user' || card.state === 'paused';
+    const cur = !stopped && L.length ? L.pop() : null;
+    const seen = card.shown || 0; card.shown = L.length;
+    let done = L.map((l, i) => row(`tst--done${l.bad ? ' tst--bad' : ''}${i >= seen ? ' tst--in' : ''}`, l.bad ? '✗' : l.skipped ? '–' : '✓', l.label, l.ms != null ? ms(l.ms) : l.at && l.end > l.at ? ms(l.end - l.at) : ''));
+    if (done.length > MAX_DONE) done = [row('tst--more', '⋯', `${done.length - MAX_DONE} wcześniej`), ...done.slice(-MAX_DONE)];
+    let tail;
+    if (card.state === 'waiting_user') { card.lastNow = null; tail = row('tst--ask', '<i></i>', card.waiting ? `${REASON_PL[card.waiting.reason] || REASON_PL.OTHER} — ${card.waiting.message}` : STATE_PL.waiting_user, '', chev); }
+    else if (card.state === 'paused') { card.lastNow = null; tail = row('tst--paused', '⏸', STATE_PL.paused, '', chev); }
+    else tail = nowRow(card, cur ? cur.label : { pending: 'budzę agenta…', queued: 'w kolejce…' }[card.state] || 'zaczynam…', (cur && cur.at) || card.startedAt, thumb + chev);
+    return done.join('') + tail;
+  }
+
+  function render(card) {
+    card.el.dataset.s = card.state;
+    card.el.innerHTML = `<div class="tsteps" role="button" tabindex="0" title="szczegóły">${stepsHtml(card)}</div><div class="tdet"><div><div class="full">${fullHtml(card)}</div></div></div>`;
     if (focused === card) onFocus && onFocus(card, false);
   }
 

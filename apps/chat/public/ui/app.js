@@ -5,7 +5,7 @@ import { md } from './markdown.js';
 import { connect } from './net.js';
 import { makePlayer, openMic } from './audio.js';
 import { createKropka } from './kropka.js';
-import { createCards, skeleton } from './cards.js';
+import { createCards, skeleton, shimmer } from './cards.js';
 import { makeAvatar, mountGroup, setState as setAvatarState, startBlinking } from './avatar.js';
 import { makeLogo, blinkLogos } from './logo.js';
 import { cfgOf } from './builder.js';
@@ -97,7 +97,7 @@ app.cards = createCards({
     $('workTitle').textContent = app.cards.kindOf(card);
     $('workBody').innerHTML = app.cards.panelHtml(card);
     const av = $('workBody').querySelector('.flow__av'); if (av && card.bot) { const a = avatarOf(card.bot, 36, ['running', 'queued', 'pending'].includes(card.state) ? 'working' : card.state === 'waiting_user' ? 'confused' : card.state === 'failed' ? 'error' : 'idle'); if (a) av.append(a); }
-    if (isDesktop() && (user || !work.isOpen)) work.open(true);
+    if (isDesktop() && user) work.open(true);
   },
 });
 
@@ -214,7 +214,7 @@ async function openSession(id) {
   app.current = id; location.hash = id;
   shell && shell.setSession(id);
   app.page = 'chat';
-  app.streaming = null; app.lastAuthor = null; app.authors = new Set(); app.cards.clear(); work.open(false);
+  thinking.el = null; app.streaming = null; app.lastAuthor = null; app.authors = new Set(); app.cards.clear(); work.open(false);
   tl.innerHTML = '';
   const sk = document.createElement('div'); sk.className = 'tl-sk'; sk.innerHTML = skeleton({ lines: 3 }) + '<div style="height:18px"></div>' + skeleton({ lines: 2 }); tl.appendChild(sk);
   showPage('chat');
@@ -320,6 +320,31 @@ function addUser(text, source, at) {
   tl.appendChild(el); scrollDown(true);
   return el;
 }
+/** Sim „myśli” (LLM call): wiadomość-zaślepka z shimmerem. Pierwsza delta odpowiedzi przejmuje ją jako swoją; gdy zamiast mówić
+ *  sim odpala narzędzie albo wraca do idle — znika i nie zostawia po sobie „ciągłości” autora. */
+const thinking = { el: null, prev: null };
+function showThinking(bot) {
+  if (thinking.el && thinking.el.dataset.author === bot && thinking.el.isConnected) return;
+  hideThinking();
+  thinking.prev = app.lastAuthor;
+  const body = addBot(bot, '', null, { by: app.turnBy, state: 'thinking' });
+  body.innerHTML = `<span class="shim-dot"></span>${shimmer('myśli…')}`;
+  thinking.el = body.closest('.msg'); thinking.el.classList.add('msg--thinking');
+}
+function hideThinking() {
+  if (!thinking.el) return;
+  if (thinking.el.isConnected) { thinking.el.remove(); app.lastAuthor = thinking.prev; }
+  thinking.el = null;
+}
+/** Odpowiedź sima zaczyna się pisać: weź jego zaślepkę „myśli…”, jeśli jest (bez skoku w wątku). */
+function takeThinking(bot) {
+  const el = thinking.el; thinking.el = null;
+  if (!el || !el.isConnected || el.dataset.author !== bot) { el && el.isConnected && (el.remove(), app.lastAuthor = thinking.prev); return null; }
+  el.classList.remove('msg--thinking');
+  const body = el.querySelector('.msg__body'); body.innerHTML = '';
+  const av = el.querySelector('.avatar'); av && setAvatarState(av, 'speaking');
+  return body;
+}
 function addBot(name, text, at, opts = {}) {
   clearEmpty();
   const cont = app.lastAuthor === name && !opts.force;
@@ -421,23 +446,24 @@ function onEvent(t, m) {
     case 'say.text':
       if (!app.streaming || app.streaming.sayId !== m.sayId) app.streaming = { sayId: m.sayId, bot: m.bot, text: '', el: null };
       app.streaming.text += m.delta;
-      if (!app.streaming.el) { app.streaming.el = addBot(m.bot, '', null, { by: app.turnBy, state: 'speaking' }); app.streaming.el.classList.add('streaming'); }
+      if (!app.streaming.el) { app.streaming.el = takeThinking(m.bot) || addBot(m.bot, '', null, { by: app.turnBy, state: 'speaking' }); app.streaming.el.classList.add('streaming'); }
       paintStream();
       break;
     case 'say.end':
       if (app.streaming && app.streaming.el) { cancelAnimationFrame(app.streaming.raf); app.streaming.el.classList.remove('streaming'); app.streaming.el.innerHTML = md(m.text || app.streaming.text, { user: app.config.me.slug, known: known() }); const av = app.streaming.el.closest('.msg')?.querySelector('.avatar'); av && setAvatarState(av, 'idle'); }
-      else if (m.text) addBot(m.bot, m.text, null, { by: app.turnBy });
+      else if (m.text) { const b = takeThinking(m.bot); if (b) b.innerHTML = md(m.text, { user: app.config.me.slug, known: known() }); else addBot(m.bot, m.text, null, { by: app.turnBy }); }
+      else hideThinking();
       app.streaming = null;
       break;
     case 'voice.end': app.player && app.player.end(m.sayId); break;
-    case 'agent.error': toast(`błąd${m.bot ? ' @' + m.bot : ''}: ${m.message}`); break;
+    case 'agent.error': hideThinking(); toast(`błąd${m.bot ? ' @' + m.bot : ''}: ${m.message}`); break;
     case 'user.command': toast(`komenda: ${m.command}`); break;
     case 'control.result': toast(m.error ? `nie da się: ${m.error}` : `${m.op}: ${m.state}`); break;
     case 'error': toast(m.message); break;
     case 'log': if (m.level !== 'info') toast(m.message); if (/^\[agent\]/.test(m.message)) agentLamp(m.message); break;
     case 'session.voice': setVoiceUi(m.on); break;
     case 'user.level': break;
-    case 'tool.call': case 'tool.result': app.cards.handle(t, m); scrollDown(); if (m.agent) agentLamp('[agent] online'); break;
+    case 'tool.call': case 'tool.result': if (t === 'tool.call') hideThinking(); app.cards.handle(t, m); scrollDown(); if (m.agent) agentLamp('[agent] online'); break;
     default:
       if (m.agent) { app.cards.handle(t, m); scrollDown(); agentLamp('[agent] online'); if (t === 'computer.action' && m.status === 'started') app.kropka && app.kropka.pulse(); }
   }
@@ -469,6 +495,7 @@ tl.addEventListener('click', async e => {
 
 function setState(s, bot) {
   app.state = s;
+  if (s === 'thinking' && bot && app.page === 'chat') showThinking(bot); else if (s !== 'speaking') hideThinking();
   const st = $('headSub').querySelector('.st'); if (st) { st.dataset.state = s; st.querySelector('span').textContent = bot && s !== 'idle' && s !== 'listening' ? `@${bot} ${STATE_PL[s] || s}` : STATE_PL[s] || s; }
   $('voiceState').textContent = STATE_PL[s] || s;
   app.kropka && app.kropka.setState(s);

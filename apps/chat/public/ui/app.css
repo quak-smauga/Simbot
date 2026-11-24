@@ -890,3 +890,33 @@ body[data-nav="open"] .nav { transform: none; }
 .recall p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .recall__none { font-size: 13px; color: var(--ink-3); }
 .memo.open .memo__first, .memo.open .memo__more { display: none; }
+
+/* ───────── kroki zadania w wątku: skończone (✓ + czas) i bieżący jako shimmer; klik = szczegóły (panel / inline) ───────── */
+.tsteps { display: flex; flex-direction: column; gap: 1px; width: fit-content; max-width: 100%; margin-left: -8px; padding: 3px 8px; border-radius: 8px; cursor: pointer; transition: background 0.15s; }
+.tsteps:hover { background: var(--soft); }
+.tst { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; line-height: 22px; color: var(--ink-2); }
+.tst__ic { width: 12px; flex: none; display: inline-flex; justify-content: center; font-size: 11px; }
+.tst__l, .tst .shim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tst__t { flex: none; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tst__t:empty { display: none; }
+.tst__chev { flex: none; display: inline-flex; color: var(--ink-3); opacity: 0; transition: opacity 0.15s, transform 0.3s var(--ease); }
+.tsteps:hover .tst__chev, .tsteps:focus-visible .tst__chev { opacity: 1; }
+.task.open .tst__chev { opacity: 1; transform: rotate(90deg); }
+.tst__thumb { width: 36px; height: 22px; border-radius: 5px; object-fit: cover; object-position: top; flex: none; background: #000; }
+.tst--in { animation: up 0.3s var(--ease); }
+.tst--done, .tst--more { color: var(--ink-3); }
+.tst--done .tst__ic, .tst--end.tst--succeeded .tst__ic { color: var(--ok); }
+.tst--bad .tst__ic, .tst--end.tst--failed .tst__ic { color: var(--bad); }
+.tst--end { color: var(--ink-3); }
+.tst--now .tst__ic i, .shim-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--q-violet); animation: shimdot 1.2s ease-in-out infinite; }
+/* „czeka na Ciebie” celowo bez shimmera — ma krzyczeć */
+.tst--ask { color: var(--bad); font-weight: 550; }
+.tst--ask .tst__ic i { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); animation: blink 0.6s infinite; }
+.tst--paused { color: var(--info); }
+@keyframes shimdot { 50% { transform: scale(0.65); opacity: 0.55; } }
+.shim { background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink-3) 40%, var(--ink) 50%, var(--ink-3) 60%, var(--ink-3) 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shim 1.8s linear infinite; font-weight: 500; }
+@keyframes shim { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+.task .tdet .full { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 12px; }
+/* sim „myśli” (LLM call) — wiadomość-zaślepka z shimmerem, zamieniana w odpowiedź przy pierwszej delcie */
+.msg--thinking .msg__body { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); min-height: 26px; }
+.msg--thinking .msg__meta { display: none; }
