@@ -15,6 +15,25 @@ export type { Decision, Decider } from "./decider.js";
 export { llmPlanner, mockPlanner, budgetFor } from "./planner.js";
 export type { Planner, TaskPlan, Stage } from "./planner.js";
 
+/**
+ * Sim może dopisać do celu kryteria akceptacji: <done_when>kliknięty co najmniej jeden filtr</done_when>.
+ * Parser nativeapi zostawia zagnieżdżone tagi w treści — tu je wyciągamy. Każde wymaganie staje się etapem planu i przechodzi weryfikację.
+ */
+export function splitGoal(raw: string): { goal: string; required: string[] } {
+  const required: string[] = [];
+  const goal = raw
+    .replace(/<done_when>([\s\S]*?)<\/done_when>/gi, (_m, t: string) => {
+      const r = t.replace(/\s+/g, " ").trim();
+      if (r && required.length < 6) required.push(r.slice(0, 200));
+      return " ";
+    })
+    .replace(/<\/?done_when>/gi, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { goal, required };
+}
+
 export const descriptor: Partial<CapabilityDescriptor> = { name: "computer" };
 
 const bool = (v: string | undefined, d: boolean) => (v === undefined || v === "" ? d : v === "1" || v.toLowerCase() === "true");
@@ -37,7 +56,8 @@ export function create(ctx: CapabilityContext): ToolMap {
 
   return {
     "computer.run": async (args, call): Promise<ToolResult> => {
-      const goal = (args._ ?? args.task ?? "").trim();
+      // <done_when>…</done_when> w treści = wymagania od zlecającego (kryteria akceptacji); reszta to cel
+      const { goal, required } = splitGoal(args._ ?? args.task ?? "");
       if (!goal) return { ok: false, text: "Pusty cel dla computer.run." };
       // kontekst z wcześniejszych kroków planu (np. wyniki web.query) — przycięty, to podpowiedź, nie instrukcja
       // + kontekst podany przez sima wprost (atrybut context="…": co user powiedział, co już wiadomo) — też tylko podpowiedź
@@ -48,7 +68,7 @@ export function create(ctx: CapabilityContext): ToolMap {
       ].filter(Boolean).join("\n\n");
       if ((args.target ?? "").trim().toLowerCase() === "desktop")
         return desktop.withLock(() => runComputerTask({ goal, context, maxSteps: desktopSteps, browser: desktop, decider: desktopDecider, planner: desktopPlanner, mode: "desktop", call, log: ctx.log, guard: (d) => desktop.guard(d) }));
-      return browser.withLock(() => runComputerTask({ goal, context, maxSteps, browser, decider, planner, mode: "browser", call, log: ctx.log }));
+      return browser.withLock(() => runComputerTask({ goal, context, maxSteps, browser, decider, planner, mode: "browser", required, call, log: ctx.log }));
     },
   };
 }

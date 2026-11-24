@@ -8,6 +8,12 @@
 //   computer.failed { error, status } · computer.cancelled { report } ·
 //   computer.plan { replan, alreadyDone, estimatedSteps, budget, cap, stages[] } · computer.stage { id, title, status: done|unconfirmed, auto?, by?, next }
 //     auto = etap zaliczył executor z warunku `check` planu (by: „URL xkcd.com/1773/”); unconfirmed = „done” bez zaliczenia etapu
+//   computer.stage niesie też kind (state|action|info), by (dowód) i why (czemu nie zaliczono); status: done|unconfirmed|unmet
+//   computer.verify { ok, repair, unmet[] } — executor sprawdził „done” decydenta: czego brakuje i czy daje jedno podejście naprawcze
+//
+// WERYFIKACJA (tylko przeglądarka): status „ok” nie zależy już od słowa decydenta. Każdy etap ma typ i dowód sprawdzany w kodzie:
+// stan → warunek na adres/tekst · akcja → krok (klik/wpisanie), po którym strona się zmieniła · informacja → dosłowny cytat z tekstu strony.
+// „done” z niespełnionym etapem → jedno podejście naprawcze (kilka kroków), potem koniec jako partial z listą, czego nie zrobiono.
 //   computer.started niesie mode: browser|desktop — UI nazywa zadanie „przeglądarka” albo „komputer”.
 //
 // PLAN: przed pętlą planner ocenia obserwację — cel już spełniony → koniec bez kliknięcia; inaczej etapy z „zrobione, gdy…”
@@ -20,8 +26,8 @@
 // Statusy: ok · partial (limit kroków / pętla, ale coś zebrane) · cancelled_by_user · failed. Czekanie na usera NIE kończy zadania.
 import type { ToolCallContext, ToolResult } from "@qwe/core";
 import type { BrowserRuntime, Observation } from "./browser.js";
-import type { Decider, Decision } from "./decider.js";
-import { bareUrl, budgetFor, checkStage, type Planner, type Stage, type TaskPlan } from "./planner.js";
+import type { Decider, Decision, StageClaim } from "./decider.js";
+import { bareUrl, budgetFor, checkStage, type Planner, type Stage, type StageKind, type TaskPlan } from "./planner.js";
 
 export type ComputerStatus = "ok" | "partial" | "cancelled_by_user" | "failed";
 
@@ -46,6 +52,8 @@ export interface RunOptions {
   /** Planner przed pętlą (i przy braku postępu): czy cel już spełniony, etapy, budżet kroków. Bez plannera — stary tryb (maxSteps). */
   planner?: Planner;
   mode?: "browser" | "desktop";
+  /** Wymagania od zlecającego (<done_when> w celu) — każde musi być etapem planu i przejść weryfikację. */
+  required?: string[];
   /** Akcja wymaga potwierdzenia niezależnie od decydenta (desktop: Terminal, Ustawienia) → powód, inaczej null. */
   guard?(d: Decision): string | null;
 }
@@ -59,6 +67,20 @@ const NO_PROGRESS = 6;
 const MAX_REPLANS = 2;
 /** Ta sama intencja (np. „idź na /random”) tyle razy od ostatniego zrobionego etapu = powtarzanie, nawet jeśli strona się zmienia. */
 const REPEAT_LIMIT = 3;
+/** Tyle kroków dostaje decydent na jedno podejście naprawcze po odrzuconym „done”. */
+const REPAIR_STEPS = 8;
+/** Akcje, które mogą być dowodem etapu typu „akcja” (nawigacja, scroll i czekanie niczego nie ustawiają). */
+const INTERACT = new Set(["click", "click_at", "type", "press"]);
+const KIND_PL: Record<StageKind, string> = { state: "stan", action: "akcja", info: "informacja" };
+const kindOf = (s: Stage): StageKind => s.kind ?? "state";
+/** Tekst do porównywania cytatów: małe litery, same litery i cyfry (interpunkcja, spacje i cudzysłowy nie mają znaczenia). */
+const normText = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+/** Wymaganie od zlecającego, którego planner nie ujął w planie: typ z treści („kliknij filtr” = akcja, „podaj cenę” = informacja). */
+const guessKind = (t: string): StageKind => (/klikn|filtr|ustaw|wybierz|wpisz|posortuj|zaznacz|wyślij|użyj|przełącz/i.test(t) ? "action" : /podaj|podan|odczyt|opisz|wypisz|ile |cen[aęy]|list[aęy] /i.test(t) ? "info" : "state");
+type Verdict = { ok: true; by: string; step?: number } | { ok: false; why: string };
+type Problem = { stage: Stage; status: "unmet" | "unconfirmed"; why: string; blocked: boolean };
+/** „Miękki” problem nie psuje statusu ok: informacja podana bez cytatu (np. odczytana z obrazu) — raport ją oznacza, sim ocenia. */
+const isSoft = (p: Problem) => kindOf(p.stage) === "info" && p.status === "unconfirmed";
 
 /** Notatki „prawie takie same” (model przepisuje ten sam fakt innymi słowami) nie są nową wiedzą. */
 const words = (t: string) => new Set(t.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
@@ -165,34 +187,134 @@ class Trace {
   lastObs: Observation | null = null;
   stages: Stage[] = [];
   /** Każdy wykonany krok z intencją — do raportu (sim widzi przebieg, nie zgaduje). */
-  history: { step: number; stage?: number; label: string; think?: string; outcome: string }[] = [];
+  history: { step: number; stage?: number; label: string; think?: string; outcome: string; action: string; ok: boolean; changed: boolean }[] = [];
+  /** Pełny tekst odwiedzonych stron (ostatni stan każdej) — tylko do sprawdzania cytatów; do modelu nie idzie. */
+  texts = new Map<string, { url: string; text: string; norm: string }>();
+  /** Potwierdzone cytaty z kontekstem — sekcja DOWODY Z EKRANU w raporcie. */
+  proofs: { stage: number; quote: string; url: string; context: string }[] = [];
 
   constructor(readonly goal: string, public budget: number, readonly mode: "browser" | "desktop" = "browser") {}
+  /** Weryfikacja dowodów działa w przeglądarce; desktop zostaje przy słowie decydenta (osobny etap prac). */
+  get strict() {
+    return this.mode === "browser";
+  }
 
   /** Bieżący etap = pierwszy otwarty (ani zrobiony, ani pominięty). */
   get current() {
-    return this.stages.find((s) => s.status !== "done" && s.status !== "skipped" && s.status !== "unconfirmed");
+    return this.stages.find((s) => s.status === "todo" || s.status === "doing");
   }
-  /** stage_done od decydenta → etap zrobiony. Wcześniejsze otwarte etapy ZOSTAJĄ otwarte (kiedyś stawały się „pominięte” — to kłamało). */
-  advance(d: Decision): Stage | null {
+  /** Czy cytat jest w tekście którejś odwiedzonej strony? Zwraca adres i kontekst (do DOWODÓW) albo null. */
+  findQuote(quote: string): { url: string; context: string } | null {
+    const q = normText(quote);
+    if (q.length < 3) return null;
+    for (const p of [...this.texts.values()].reverse()) {
+      if (!p.norm.includes(q)) continue;
+      // kontekst z oryginalnego tekstu: szukamy pierwszego słowa cytatu, bierzemy okolicę
+      const first = quote.trim().split(/\s+/)[0].toLowerCase();
+      const at = Math.max(0, p.text.toLowerCase().indexOf(first));
+      return { url: p.url, context: p.text.slice(Math.max(0, at - 60), at + quote.length + 100).replace(/\s+/g, " ").trim() };
+    }
+    return null;
+  }
+  /**
+   * Czy dowód decydenta wystarcza, żeby zaliczyć etap? Zależy od typu:
+   * stan — warunek `check` na bieżącej stronie; bez warunku wystarcza słowo decydenta (asserted) ·
+   * akcja — krok K istnieje, był kliknięciem/wpisaniem, zmienił stronę i nie jest już dowodem innego etapu ·
+   * informacja — cytat jest w tekście którejś odwiedzonej strony.
+   */
+  verifyClaim(s: Stage, c: { step?: number; quote?: string; asserted?: boolean }): Verdict {
+    const kind = kindOf(s);
+    const byStep = (n: number): Verdict => {
+      const h = this.history.find((x) => x.step === n);
+      if (!h) return { ok: false, why: `nie ma kroku ${n} w przebiegu` };
+      if (!INTERACT.has(h.action)) return { ok: false, why: `krok ${n} (${h.label}) to nie kliknięcie ani wpisanie — niczego na stronie nie ustawił` };
+      if (!h.ok || !h.changed) return { ok: false, why: `krok ${n} (${h.label}) nic nie zmienił na stronie` };
+      const other = this.stages.find((x) => x !== s && x.status === "done" && x.doneStep === n);
+      if (other) return { ok: false, why: `krok ${n} (${h.label}) zaliczył już etap ${other.id} „${other.title}” — jedna akcja nie jest dowodem dwóch wymagań` };
+      return { ok: true, by: `krok ${n}: ${h.label}`, step: n };
+    };
+    const byQuote = (q: string): Verdict => {
+      const hit = this.findQuote(q);
+      if (!hit) return { ok: false, why: `cytatu „${q.slice(0, 60)}” nie ma w tekście odwiedzonych stron` };
+      if (!this.proofs.some((p) => p.stage === s.id && p.quote === q)) this.proofs.push({ stage: s.id, quote: q.slice(0, 120), url: hit.url, context: hit.context });
+      return { ok: true, by: `cytat „${q.slice(0, 60)}”` };
+    };
+    const step = Number.isInteger(c.step) ? (c.step as number) : undefined;
+    const quote = typeof c.quote === "string" && c.quote.trim() ? c.quote.trim() : undefined;
+    if (kind === "action") return step === undefined ? { ok: false, why: "brak dowodu: nie wskazano kroku, w którym to kliknięto/ustawiono" } : byStep(step);
+    if (kind === "info") return quote ? byQuote(quote) : { ok: false, why: "bez cytatu z tekstu strony (np. odczytane tylko ze zrzutu)" };
+    if (s.check) {
+      const by = this.lastObs ? checkStage(s.check, this.lastObs) : null;
+      return by ? { ok: true, by } : { ok: false, why: "warunek etapu nie jest spełniony na bieżącej stronie" };
+    }
+    if (quote) return byQuote(quote);
+    if (step !== undefined) return byStep(step);
+    return c.asserted ? { ok: true, by: "decydent" } : { ok: false, why: "nierozliczony: decydent zakończył bez słowa o tym etapie" };
+  }
+  private markDone(s: Stage, v: Extract<Verdict, { ok: true }>) {
+    s.status = "done";
+    s.doneBy = v.by;
+    if (v.step !== undefined) s.doneStep = v.step;
+    s.why = undefined;
+    const next = this.current;
+    if (next) next.status = "doing";
+  }
+  /**
+   * stage_done od decydenta. W przeglądarce etap jest zaliczony dopiero, gdy dowód przejdzie weryfikację — inaczej wraca powód odrzucenia.
+   * Wcześniejsze otwarte etapy ZOSTAJĄ otwarte (kiedyś stawały się „pominięte” — to kłamało).
+   */
+  advance(d: Decision): { done: Stage } | { rejected: Stage; why: string } | null {
     if (!d.stage_done || !this.stages.length) return null;
     const s = this.stages.find((x) => x.id === d.stage) ?? this.current;
     if (!s || s.status === "done") return null;
-    s.status = "done";
-    s.doneBy = "decydent";
-    const next = this.current;
-    if (next) next.status = "doing";
-    return s;
+    const v: Verdict = this.strict ? this.verifyClaim(s, { step: d.proof_step, quote: d.proof_quote, asserted: true }) : { ok: true, by: "decydent" };
+    if (!v.ok) {
+      s.why = v.why;
+      return { rejected: s, why: v.why };
+    }
+    this.markDone(s, v);
+    return { done: s };
+  }
+  /**
+   * Rozliczenie przy „done”: każdy niezaliczony etap dostaje werdykt z dowodu decydenta (pole stages) albo z samej strony.
+   * final=false — tylko sprawdzamy (przed podejściem naprawczym), final=true — statusy idą do raportu.
+   */
+  settle(claims: StageClaim[] | undefined, final: boolean): { fresh: Stage[]; problems: Problem[] } {
+    const fresh: Stage[] = [], problems: Problem[] = [];
+    for (const s of this.stages) {
+      if (s.status === "done") continue;
+      const c = (Array.isArray(claims) ? claims : []).find((x) => x && Number(x.id) === s.id);
+      let p: Problem;
+      if (c && c.met === false) p = { stage: s, status: "unmet", why: (c.why || "decydent: nie zrobione").slice(0, 200), blocked: c.blocked === true };
+      else {
+        const v = this.verifyClaim(s, { step: c?.step, quote: c?.quote, asserted: !!c });
+        if (v.ok) {
+          this.markDone(s, v);
+          fresh.push(s);
+          continue;
+        }
+        p = { stage: s, status: c ? "unconfirmed" : "unmet", why: v.why, blocked: false };
+      }
+      s.why = p.why;
+      if (final) {
+        s.status = p.status;
+        s.blocked = p.blocked;
+      }
+      problems.push(p);
+    }
+    return { fresh, problems };
   }
   /** Etapy z warunkiem `check` zalicza executor sam, z obserwacji — bez czekania, aż model przypomni sobie o stage_done. */
-  auto(o: Observation): Stage[] {
+  auto(o: Observation, step: number): Stage[] {
     const done: Stage[] = [];
     for (const s of this.stages) {
-      if (s.status === "done" || !s.check) continue;
+      if (s.status === "done" || !s.check || kindOf(s) !== "state") continue;
       const by = checkStage(s.check, o);
       if (!by) continue;
       s.status = "done";
       s.doneBy = by;
+      s.doneStep = step;
+      s.why = undefined;
       done.push(s);
     }
     const next = this.current;
@@ -201,19 +323,27 @@ class Trace {
   }
   /** Zadanie skończone „done”: etapy, których nikt nie zaliczył, są NIEPOTWIERDZONE (nie „niepotrzebne”). Zwraca je. */
   closeOpen(): Stage[] {
-    const open = this.stages.filter((s) => s.status !== "done" && s.status !== "skipped" && s.status !== "unconfirmed");
+    const open = this.stages.filter((s) => s.status === "todo" || s.status === "doing");
     for (const s of open) s.status = "unconfirmed";
     return open;
   }
   planText(): string {
     if (!this.stages.length) return "";
     const cur = this.current;
-    const lines = this.stages.map((s) => (s.status === "done" ? `✓ ${s.id}. ${s.title} — ZROBIONY (${s.doneBy ?? "zaliczony"})` : `${s === cur ? "→" : "·"} ${s.id}. ${s.title} — zrobione, gdy: ${s.doneWhen}${s.check ? " [executor sprawdza sam]" : ""}`));
+    const tag = (s: Stage) => (this.strict ? ` [${KIND_PL[kindOf(s)]}]` : "");
+    const lines = this.stages.map((s) => (s.status === "done" ? `✓ ${s.id}. ${s.title}${tag(s)} — ZROBIONY (${s.doneBy ?? "zaliczony"})` : `${s === cur ? "→" : "·"} ${s.id}. ${s.title}${tag(s)} — zrobione, gdy: ${s.doneWhen}${s.check ? " [executor sprawdza sam]" : ""}${s.why ? ` (NIE ZALICZONO: ${s.why})` : ""}`));
     return `${lines.join("\n")}${cur ? "" : "\nWSZYSTKIE ETAPY ZROBIONE → zwróć \"done\" z raportem."}`;
   }
 
   visit(o: Observation, start = false) {
     this.lastObs = o;
+    if (o.url && o.url !== "about:blank") {
+      const text = o.fullText ?? o.text;
+      const k = pageKey(o.url);
+      this.texts.delete(k); // na koniec kolejki — najświeższe strony zostają
+      this.texts.set(k, { url: o.url, text, norm: normText(text) });
+      if (this.texts.size > 12) this.texts.delete(this.texts.keys().next().value as string);
+    }
     if (start) {
       this.start = { url: o.url, title: o.title };
       return;
@@ -262,8 +392,20 @@ class Trace {
       `WYNIK: ${headline || "(brak)"}`,
       `KROKI: ${this.steps}/${this.budget}${this.lastAction ? ` · ostatni: ${this.lastAction}` : ""}`,
     ];
-    // ✓ zaliczony (w nawiasie: czym) · ? niepotwierdzony — zadanie zakończone bez zaliczenia etapu, nikt tego nie sprawdził · ✗ niezrobiony
-    if (this.stages.length) lines.push(`PLAN (✓ zaliczony · ? niepotwierdzony: executor zakończył bez zaliczenia tego etapu — nie wiadomo, czy zrobiony${status === "ok" ? "" : " · ✗ niezrobiony"}):\n${this.stages.map((s) => `${s.status === "done" ? "✓" : s.status === "unconfirmed" || s.status === "skipped" || status === "ok" ? "?" : "✗"} ${s.id}. ${s.title}${s.status === "done" && s.doneBy ? ` (${s.doneBy})` : ""}`).join("\n")}`);
+    if (this.stages.length && this.strict) {
+      // przeglądarka: każdy etap to wymaganie z dowodem sprawdzonym w kodzie — sim widzi, co potwierdzone, a co tylko zadeklarowane
+      const row = (s: Stage) => {
+        const k = ` [${KIND_PL[kindOf(s)]}]`;
+        if (s.status === "done") return `✓ ${s.id}. ${s.title}${k}${s.doneBy ? ` — ${s.doneBy}` : ""}`;
+        if (s.status === "unconfirmed") return `? ${s.id}. ${s.title}${k} — NIEPOTWIERDZONE: ${s.why ?? "brak dowodu"}`;
+        return `✗ ${s.id}. ${s.title}${k} — NIEZROBIONE${s.blocked ? " (nie da się)" : ""}: ${s.why ?? "zadanie skończyło się wcześniej"}`;
+      };
+      lines.push(`WYMAGANIA (✓ potwierdzone dowodem · ? zadeklarowane, ale niepotwierdzone — nie traktuj jako pewne · ✗ niezrobione):\n${this.stages.map(row).join("\n")}`);
+      if (this.proofs.length) lines.push(`DOWODY Z EKRANU (cytaty znalezione w tekście strony):\n${this.proofs.slice(-8).map((p) => `- [${p.stage}] „${p.quote}” — ${p.url}\n  …${p.context}…`).join("\n")}`);
+    } else if (this.stages.length) {
+      // desktop: bez weryfikacji dowodów — ✓ zaliczony · ? niepotwierdzony (zakończone bez zaliczenia etapu) · ✗ niezrobiony
+      lines.push(`PLAN (✓ zaliczony · ? niepotwierdzony: executor zakończył bez zaliczenia tego etapu — nie wiadomo, czy zrobiony${status === "ok" ? "" : " · ✗ niezrobiony"}):\n${this.stages.map((s) => `${s.status === "done" ? "✓" : s.status === "unconfirmed" || s.status === "skipped" || status === "ok" ? "?" : "✗"} ${s.id}. ${s.title}${s.status === "done" && s.doneBy ? ` (${s.doneBy})` : ""}`).join("\n")}`);
+    }
     if (this.history.length) {
       const h = this.history.length > 20 ? [`(… ${this.history.length - 20} wcześniejszych kroków)`, ...this.history.slice(-20).map(fmtStep)] : this.history.map(fmtStep);
       lines.push(`PRZEBIEG (krok · akcja · po co · efekt):\n${h.join("\n")}`);
@@ -273,9 +415,9 @@ class Trace {
     if (this.notes.length) lines.push(`ZEBRANE PO DRODZE (surowe notatki z kolejnych kroków — przy różnicach obowiązuje WYNIK):\n${this.notes.map((n) => `- ${n}`).join("\n")}`);
     if (this.handoffs.length) lines.push(`USER: ${this.handoffs.join("; ")}`);
     const bad = [...this.loops.map((l) => `pętla: ${l}`), ...this.failures];
-    if (bad.length) lines.push(`NIE ZADZIAŁAŁO:\n${bad.slice(-8).map((b) => `- ${b}`).join("\n")}`);
+    if (bad.length) lines.push(`NIE ZADZIAŁAŁO (potknięcia WYKONAWCY — celowanie, pętle, kolejność; to nie są cechy tej strony i nie nadają się na nauczkę o niej):\n${bad.slice(-8).map((b) => `- ${b}`).join("\n")}`);
     if (o && o.url !== "about:blank") {
-      const text = o.text.replace(/\n{2,}/g, "\n").trim().slice(0, status === "ok" ? 300 : 700);
+      const text = o.text.replace(/\n{2,}/g, "\n").trim().slice(0, 700);
       lines.push(`OSTATNI WIDOK: ${o.title || "(bez tytułu)"} — ${o.url}${text ? `\n${text}` : ""}`);
     }
     return lines.join("\n");
@@ -308,11 +450,13 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
     });
     return obs;
   };
-  const finish = (status: ComputerStatus, headline: string): ToolResult => {
+  /** fromDone: decydent zgłosił „done”, weryfikacja znalazła braki → partial, ale to dalej wynik (computer.completed), nie awaria. */
+  const finish = (status: ComputerStatus, headline: string, fromDone = false): ToolResult => {
     if (status === "ok") for (const s of trace.closeOpen()) emit("computer.stage", { id: s.id, title: s.title, status: "unconfirmed", next: null });
     const text = trace.report(status, headline);
-    const data = { status, steps: trace.steps, url: trace.lastObs?.url, title: trace.lastObs?.title, visited: trace.visits.map((v) => v.url), notes: trace.notes };
-    if (status === "ok") emit("computer.completed", { result: headline, steps: trace.steps, url: trace.lastObs?.url, status });
+    const requirements = trace.stages.map((s) => ({ id: s.id, title: s.title, kind: kindOf(s), status: s.status, by: s.doneBy, why: s.why, req: s.req }));
+    const data = { status, steps: trace.steps, url: trace.lastObs?.url, title: trace.lastObs?.title, visited: trace.visits.map((v) => v.url), notes: trace.notes, requirements };
+    if (status === "ok" || (status === "partial" && fromDone)) emit("computer.completed", { result: headline, steps: trace.steps, url: trace.lastObs?.url, status, unmet: trace.stages.filter((s) => s.status === "unmet" || s.status === "unconfirmed").map((s) => ({ id: s.id, title: s.title, status: s.status, why: s.why })) });
     else if (status === "cancelled_by_user") emit("computer.cancelled", { report: text.slice(0, 600) });
     else emit("computer.failed", { error: headline, steps: trace.steps, status });
     return { ok: status === "ok", status, text, data };
@@ -333,19 +477,28 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
   let budget = o.maxSteps;
   let replans = 0;
   const applyPlan = (p: TaskPlan, step: number, replan: boolean) => {
-    trace.stages = p.stages.map((s, i) => {
+    // replan nie kasuje tego, co już potwierdzone dowodem: zaliczone wymagania zlecającego przechodzą do nowego planu
+    const kept = trace.stages.filter((s) => s.status === "done" && s.req);
+    const planned = p.stages.filter((s) => !kept.some((k) => k.req === s.req && s.req));
+    // wymaganie zlecającego, którego planner nie ujął (albo zgubił przy replanie), wraca jako osobny etap — nie da się go pominąć
+    const missing: Stage[] = (o.required ?? []).map((r, i) => ({ r, n: i + 1 })).filter(({ n }) => ![...kept, ...planned].some((s) => s.req === n)).map(({ r, n }) => ({ id: 0, title: r.slice(0, 120), doneWhen: r.slice(0, 200), kind: guessKind(r), req: n, status: "todo" as const }));
+    let firstOpen = true;
+    trace.stages = [...kept, ...planned, ...missing].map((s, i) => {
+      if (s.status === "done") return { ...s, id: i + 1 };
       // warunek spełniony już na obserwacji, na której powstał plan, niczego nie sprawdza („tytuł zawiera »serenad«” na stronie,
       // na której już jesteśmy) — zaliczyłby etap po pierwszej dowolnej akcji. Taki etap zostaje bez warunku: zalicza go decydent.
-      const check = s.check && mode === "browser" && !checkStage(s.check, obs) ? s.check : undefined;
-      return { ...s, check, status: i === 0 ? "doing" : "todo" };
+      const check = s.check && mode === "browser" && kindOf(s) === "state" && !checkStage(s.check, obs) ? s.check : undefined;
+      const status = firstOpen ? ("doing" as const) : ("todo" as const);
+      firstOpen = false;
+      return { ...s, id: i + 1, check, status };
     });
     budget = Math.min(o.maxSteps, step + budgetFor(p.estimatedSteps, o.maxSteps));
     trace.budget = budget;
-    emit("computer.plan", { replan, alreadyDone: p.alreadyDone, why: p.why, estimatedSteps: p.estimatedSteps, budget, cap: o.maxSteps, stages: trace.stages.map((s) => ({ id: s.id, title: s.title, doneWhen: s.doneWhen, check: s.check, status: s.status })) });
+    emit("computer.plan", { replan, alreadyDone: p.alreadyDone, why: p.why, estimatedSteps: p.estimatedSteps, budget, cap: o.maxSteps, stages: trace.stages.map((s) => ({ id: s.id, title: s.title, doneWhen: s.doneWhen, kind: kindOf(s), check: s.check, req: s.req, by: s.doneBy, status: s.status })) });
   };
   if (o.planner) {
     try {
-      const p = await o.planner.plan({ goal: o.goal, context: o.context, observation: obs, mode, cap: o.maxSteps }, call.signal);
+      const p = await o.planner.plan({ goal: o.goal, context: o.context, observation: obs, mode, cap: o.maxSteps, required: o.required }, call.signal);
       if (p.alreadyDone) {
         emit("computer.plan", { replan: false, alreadyDone: true, why: p.why, estimatedSteps: 0, budget: 0, cap: o.maxSteps, stages: [] });
         trace.note(p.result);
@@ -362,7 +515,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
     if (!o.planner || replans >= MAX_REPLANS || step >= o.maxSteps) return null;
     replans++;
     try {
-      const p = await o.planner.plan({ goal: o.goal, context: o.context, observation: obs, mode, cap: o.maxSteps, previous: { stages: trace.stages, report: trace.report("partial", why), stepsLeft: o.maxSteps - step } }, call.signal);
+      const p = await o.planner.plan({ goal: o.goal, context: o.context, observation: obs, mode, cap: o.maxSteps, required: o.required, previous: { stages: trace.stages, report: trace.report("partial", why), stepsLeft: o.maxSteps - step } }, call.signal);
       if (p.alreadyDone) {
         trace.note(p.result);
         return finish("ok", p.result || "Cel spełniony.");
@@ -383,6 +536,18 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
   let deciderErrors = 0;
   let expect: string | undefined;
   let lastProgress = 0;
+  /** Podejście naprawcze po odrzuconym „done” — najwyżej jedno. pendingResult = wynik z tamtego „done” (gdyby zabrakło kroków). */
+  let repaired = false;
+  let pendingResult: string | undefined;
+  /** Ostateczne rozliczenie „done”: statusy etapów do raportu, ok tylko gdy nie ma twardych braków. */
+  const finishDone = (result: string, claims: StageClaim[] | undefined): ToolResult => {
+    const { fresh, problems } = trace.settle(claims, true);
+    for (const s of fresh) emit("computer.stage", { id: s.id, title: s.title, kind: kindOf(s), status: "done", by: s.doneBy, next: null });
+    for (const p of problems) emit("computer.stage", { id: p.stage.id, title: p.stage.title, kind: kindOf(p.stage), status: p.status, why: p.why, blocked: p.blocked || undefined, next: null });
+    const hard = problems.filter((p) => !isSoft(p));
+    emit("computer.verify", { ok: !hard.length, repair: false, unmet: problems.map((p) => ({ id: p.stage.id, title: p.stage.title, kind: kindOf(p.stage), status: p.status, why: p.why })) });
+    return finish(hard.length ? "partial" : "ok", result, true);
+  };
   /** Ile razy każda intencja padła od ostatniego zrobionego etapu (xkcd: navigate /random i klik „Random” na zmianę). */
   const repeats = new Map<string, number>();
   try {
@@ -406,16 +571,38 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
         emit("computer.note", { text: d.note });
         lastProgress = step;
       }
-      const doneStage = trace.advance(d);
-      if (doneStage) {
+      const adv = trace.advance(d);
+      if (adv && "done" in adv) {
+        const doneStage = adv.done;
         lastProgress = step;
         repeats.clear();
-        emit("computer.stage", { id: doneStage.id, title: doneStage.title, status: "done", next: trace.current?.id ?? null });
-        log.push(`${step}. ✓ etap ${doneStage.id} „${doneStage.title}” zrobiony${trace.current ? ` — teraz etap ${trace.current.id}` : " — wszystkie etapy zrobione → done"}`);
+        emit("computer.stage", { id: doneStage.id, title: doneStage.title, kind: kindOf(doneStage), status: "done", by: doneStage.doneBy, next: trace.current?.id ?? null });
+        log.push(`${step}. ✓ etap ${doneStage.id} „${doneStage.title}” zrobiony (${doneStage.doneBy})${trace.current ? ` — teraz etap ${trace.current.id}` : " — wszystkie etapy zrobione → done"}`);
+      } else if (adv && d.action !== "done") {
+        // dowód nie przeszedł: etap zostaje otwarty, decydent dostaje powód (przy „done” powie mu to weryfikacja niżej)
+        log.push(`${step}. ✗ etap ${adv.rejected.id} „${adv.rejected.title}” NIE zaliczony — ${adv.why}. ${kindOf(adv.rejected) === "action" ? "Najpierw wykonaj tę akcję na stronie, potem zalicz etap z \"proof_step\": numer tego kroku." : kindOf(adv.rejected) === "info" ? "Podaj \"proof_quote\": dosłowny fragment tekstu strony." : ""}`);
       }
 
-      // koniec?
-      if (d.action === "done") return finish("ok", (d.result || "").trim() || `Zrobione. Strona: ${obs.title || obs.url}`);
+      // koniec? W przeglądarce „done” przechodzi weryfikację: braki → jedno podejście naprawcze, potem partial z listą.
+      if (d.action === "done") {
+        const result = (d.result || "").trim() || `Zrobione. Strona: ${obs.title || obs.url}`;
+        if (!trace.strict || !trace.stages.length) return finish("ok", result);
+        const canRepair = !repaired && step < o.maxSteps;
+        const dry = trace.settle(d.stages, false);
+        const fixable = dry.problems.filter((p) => !p.blocked && !isSoft(p));
+        for (const s of dry.fresh) emit("computer.stage", { id: s.id, title: s.title, kind: kindOf(s), status: "done", by: s.doneBy, next: trace.current?.id ?? null });
+        if (fixable.length && canRepair) {
+          repaired = true;
+          pendingResult = result;
+          budget = Math.min(o.maxSteps, Math.max(budget, step + REPAIR_STEPS));
+          trace.budget = budget;
+          lastProgress = step;
+          emit("computer.verify", { ok: false, repair: true, steps: budget - step, unmet: fixable.map((p) => ({ id: p.stage.id, title: p.stage.title, kind: kindOf(p.stage), why: p.why })) });
+          log.push(`${step}. (WERYFIKACJA: "done" odrzucone — zadanie NIE jest skończone. Brakuje: ${fixable.map((p) => `etap ${p.stage.id} „${p.stage.title}” [${KIND_PL[kindOf(p.stage)]}] — ${p.why}`).join(" · ")}. Masz jeszcze ${budget - step} kroków: zrób to, czego brakuje (albo podaj poprawny dowód), potem "done" z polem "stages". Jeśli się nie da — w "stages" daj "met":false,"blocked":true i powód.)`);
+          continue;
+        }
+        return finishDone(result, d.stages);
+      }
       if (d.action === "fail") {
         trace.failures.push(d.error);
         return finish(trace.notes.length ? "partial" : "failed", d.error);
@@ -526,16 +713,16 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
       if (trace.visits.length > visitsBefore && repeatNo < REPEAT_LIMIT) lastProgress = step;
       trace.lastAction = `${label} → ${outcome}`;
       const stageNo = d.stage ?? trace.current?.id;
-      trace.history.push({ step, stage: stageNo, label, think: d.think, outcome });
+      trace.history.push({ step, stage: stageNo, label, think: d.think, outcome, action: d.action, ok: !actionError, changed });
       // log z intencją: model w następnym kroku wie, PO CO to zrobił, a nie tylko CO kliknął
       log.push(`${step}.${stageNo ? ` [etap ${stageNo}]` : ""} ${label}${d.think ? ` — po co: ${d.think}` : ""} → ${outcome}`);
       expect = d.expect?.trim() || undefined;
       // etapy z warunkiem zalicza executor (tylko przeglądarka): po akcji, na świeżej obserwacji
       if (mode === "browser") {
-        for (const s of trace.auto(obs)) {
+        for (const s of trace.auto(obs, step)) {
           lastProgress = step;
           repeats.clear();
-          emit("computer.stage", { id: s.id, title: s.title, status: "done", auto: true, by: s.doneBy, next: trace.current?.id ?? null });
+          emit("computer.stage", { id: s.id, title: s.title, kind: kindOf(s), status: "done", auto: true, by: s.doneBy, next: trace.current?.id ?? null });
           log.push(`${step}. ✓ etap ${s.id} „${s.title}” ZALICZONY AUTOMATYCZNIE (${s.doneBy}) — ten etap jest zrobiony; NIE powtarzaj akcji, która do niego doprowadziła${trace.current ? ` — teraz etap ${trace.current.id}` : " — wszystkie etapy zrobione → done z raportem"}`);
         }
       }
@@ -587,5 +774,6 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
     }
   }
   if (aborted()) return finish("cancelled_by_user", "user anulował zadanie — poniżej to, co zdążyłem zrobić i zobaczyć");
+  if (pendingResult) return finishDone(pendingResult, undefined);
   return finish(trace.notes.length || trace.visits.length > 1 ? "partial" : "failed", `limit ${budget} kroków — cel nieosiągnięty, raport z tego, co zebrane`);
 }

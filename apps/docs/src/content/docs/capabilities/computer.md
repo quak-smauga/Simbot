@@ -86,11 +86,29 @@ flowchart TB
 - **Pamięć taska**: bieżąca strona ma dopisek `← TU JESTEŚ TERAZ`; strona, na której przeglądarka stała przed zadaniem, to `STRONA STARTOWA` / `START` w raporcie i nie trafia do `ODWIEDZONE`.
 - **Najpierw zrzut**: decydent przed wyborem `[N]` patrzy na zrzut — reklama, modal albo baner nad stroną → najpierw zamknięcie (przycisk z listy albo `click_at` w X, bo reklamy w iframe nie mają `[N]`); treści jeszcze nie widać → `wait`.
 - **Planner** (`planner.ts`): przed pętlą i przy braku postępu (replan), osobny prompt na tryb. Przykład (desktop): „wejdź do nowej karty w Brave”, a karta już jest na ekranie → koniec w kroku 0.
-- **Etapy planu**: `todo` → `doing` → `done`. Etap zalicza się na dwa sposoby:
-  - **executor sam** (tylko przeglądarka), gdy planner dał etapowi warunek `check` — `url_contains`, `url_matches` (regex), `title_contains`, `text_contains`; wszystkie podane pola muszą pasować. Adres porównywany bez protokołu i `www.`, tekst w całym `fullText` bez rozróżniania wielkości liter. Sprawdzany po każdej akcji (nigdy na obserwacji startowej). Warunek, który jest prawdziwy już na obserwacji, na której powstał plan, odpada — taki etap zalicza decydent. Event `computer.stage` ma wtedy `auto: true` i `by` (np. `URL xkcd.com/1773/`), a decydent dostaje w logu „✓ etap N … ZALICZONY AUTOMATYCZNIE”,
-  - **decydent** polem `stage_done` (etapy bez `check`).
+- **Etapy planu = wymagania** (przeglądarka). Każde polecenie z celu ma swój etap; planner nie może żadnego pominąć ani wchłonąć w „strona otwarta”. Etap ma typ (`Stage.kind`), a od typu zależy, co jest dowodem jego zrobienia:
 
-  Zaliczenie etapu nie rusza wcześniejszych: zostają otwarte. Przy zakończeniu `done` etapy, których nikt nie zaliczył, dostają status `unconfirmed` (`?` w raporcie) — to znaczy „nie wiadomo, czy zrobiony”, a nie „niepotrzebny”. Statusu `skipped` executor już nie nadaje (zostaje w starych zapisach rozmów).
+  | Typ | Co to jest | Dowód (sprawdzany w kodzie) |
+  |---|---|---|
+  | `state` (stan) | adres, otwarta podstrona, widoczny widok | warunek `check` — `url_contains`, `url_matches` (regex), `title_contains`, `text_contains`; wszystkie podane pola muszą pasować. Executor sprawdza go sam po każdej akcji (`computer.stage` z `auto: true`). Bez `check` wystarcza `stage_done` decydenta |
+  | `action` (akcja) | coś trzeba kliknąć, wpisać, ustawić: filtr, sortowanie, formularz | **krok**: `click` / `click_at` / `type` / `press`, po którym strona się zmieniła. Nawigacja, scroll i czekanie się nie liczą; jeden krok nie jest dowodem dwóch etapów. `check` jest ignorowany |
+  | `info` (informacja) | dane do odczytania i podania w raporcie | **dosłowny cytat** znaleziony w tekście którejś odwiedzonej strony (porównanie bez wielkości liter i interpunkcji). `check` jest ignorowany |
+
+  Adres w `check` porównywany bez protokołu i `www.`, tekst w całym `fullText`. Warunek prawdziwy już na obserwacji, na której powstał plan, odpada. Zaliczenie etapu nie rusza wcześniejszych: zostają otwarte.
+- **Dowody od decydenta**: `stage_done` z `proof_step` (numer kroku) albo `proof_quote` (cytat). Zły dowód = etap zostaje otwarty, a decydent dostaje powód w logu. `done` niesie pole `stages` z rozliczeniem każdego niezaliczonego etapu: `{id, met: true, step | quote}` albo `{id, met: false, why, blocked}`.
+- **Weryfikacja przed `ok`** (event `computer.verify`): przy `done` executor rozlicza wszystkie etapy.
+  - Wszystko potwierdzone → `ok`.
+  - Braki, które da się naprawić (etap `state` / `action` niezrobiony albo z odrzuconym dowodem) → **jedno podejście naprawcze**: decydent dostaje w logu „WERYFIKACJA: »done« odrzucone — brakuje: …” i do 8 kroków. Potem drugie `done` jest ostateczne.
+  - Etap zgłoszony jako `blocked` (logowanie, brak funkcji na stronie) → bez poprawki, od razu `partial`.
+  - Informacja podana bez cytatu albo z cytatem, którego nie ma na stronie (np. opis odczytany z obrazka) → `?` w raporcie, ale status zostaje `ok`: ocenia to sim.
+- **Wymagania od sima (`<done_when>`)**: sim może dopisać do celu kryteria akceptacji, po jednym tagu na rzecz. Plugin wycina je z celu (`splitGoal`) i przekazuje plannerowi jako `required`; etap, który zamyka wymaganie, ma `req: numer`. Wymaganie, którego planner nie ujął, executor dokłada jako osobny etap (typ zgadywany z treści). Zaliczone wymaganie przechodzi do nowego planu przy replanie.
+
+  ```xml
+  <computer.run>Otwórz leafly.com i znajdź odmianę przez katalog.
+  <done_when>jesteś na stronie jednej odmiany</done_when>
+  <done_when>kliknięty co najmniej jeden filtr w katalogu i lista się zmieniła</done_when></computer.run>
+  ```
+- **Desktop** zostaje przy starym zachowaniu: `stage_done` na słowo decydenta, `done` → `ok`, niezaliczone etapy `unconfirmed`.
 - **Budżet kroków** z szacunku plannera; `QWE_COMPUTER_MAX_STEPS` (25) to tylko twardy limit.
 - **Ochrona przed pętlą** (`computer.loop`) → zmiana strategii, po 3 pętlach koniec jako `partial`:
   - ta sama akcja 3× bez zmiany strony,
@@ -121,12 +139,14 @@ Wznów = zgoda na wznowienie; runtime robi nową obserwację i sam sprawdza stan
 Każde zakończenie wraca do sima jako pełny raport: tryb, odwiedzone strony po kolei, kroki, notatki, przekazania kontroli, co nie zadziałało, ostatni widok. Sim nie dostaje samego „anulowano”, kiedy zadanie w połowie się udało.
 
 - `TRYB` — pierwsza linia: przeglądarka wbudowana albo desktop.
-- `PLAN` — `✓` zaliczony (w nawiasie czym: `URL …` albo `decydent`) · `?` niepotwierdzony (zadanie zakończone bez zaliczenia etapu) · `✗` niezrobiony. `✗` pojawia się **tylko** przy statusie innym niż `ok`.
+- `WYMAGANIA` (przeglądarka) — każdy etap z typem i dowodem: `✓ 2. Katalog otwarty [stan] — URL leafly.com/strains` · `? 5. Opis komiksu [informacja] — NIEPOTWIERDZONE: bez cytatu…` · `✗ 3. Filtr ustawiony [akcja] — NIEZROBIONE: powód` (z dopiskiem `(nie da się)` przy `blocked`). W desktopie sekcja nazywa się `PLAN` i nie ma dowodów.
+- `DOWODY Z EKRANU` — potwierdzone cytaty z adresem strony i kontekstem.
+- `NIE ZADZIAŁAŁO` — z nagłówkiem, że to potknięcia wykonawcy, a nie cechy strony (żeby sim nie zapisywał ich jako nauczek o serwisie).
 - `START` — strona otwarta przed zadaniem (po poprzednim); nie jest częścią wyniku.
 - `PRZEBIEG` — każdy krok z efektem akcji (patrz wyżej).
 - `ZEBRANE PO DRODZE` — surowe notatki z kolejnych kroków; przy różnicach obowiązuje `WYNIK`.
 
-Statusy (`ToolResult.status`): `ok` · `partial` (limit kroków / pętla, ale coś zebrane) · `cancelled_by_user` · `failed`. Czekanie na usera **nie** kończy zadania.
+Statusy (`ToolResult.status`): `ok` (w przeglądarce: wszystkie wymagania potwierdzone, najwyżej informacje z `?`) · `partial` (wymaganie niezrobione albo niepotwierdzone; albo limit kroków / pętla, ale coś zebrane) · `cancelled_by_user` · `failed`. `ToolResult.data.requirements` niesie listę wymagań ze statusami. Czekanie na usera **nie** kończy zadania.
 
 ## Przeglądarka
 

@@ -20,6 +20,15 @@ tools:
     notes: |
       Opisz CEL i oczekiwany rezultat, nie kliknięcia. Przykład: "Otwórz quak.com.pl, sprawdź jakie są podstrony i podsumuj".
       Domyślnie to WBUDOWANA przeglądarka (własne okno simbota), nie przeglądarka usera — w celu pisz o stronie, nie o Brave/Chrome.
+      Gdy zadanie ma kilka części albo coś MUSI się wydarzyć po drodze (kliknięty filtr, wysłany formularz, podane konkretne dane),
+      dopisz kryteria — po jednym <done_when> na rzecz, którą da się sprawdzić:
+      <computer.run>Otwórz leafly.com i znajdź odmianę przez katalog.
+      <done_when>jesteś na stronie jednej odmiany</done_when>
+      <done_when>kliknięty co najmniej jeden filtr w katalogu i lista się zmieniła</done_when>
+      <done_when>podane: typ, THC, główne efekty</done_when></computer.run>
+      Wykonawca nie może żadnego kryterium pominąć i musi każde udowodnić (krok albo cytat ze strony). Proste zadanie („otwórz xkcd”) nie potrzebuje kryteriów.
+      Raport ma sekcję WYMAGANIA: ✓ potwierdzone dowodem · ? zadeklarowane, ale niepotwierdzone (np. opis odczytany z obrazka) — nie podawaj tego userowi jako pewnik ·
+      ✗ niezrobione (z powodem). STATUS partial = wynik jest, ale nie wszystko się udało: powiedz userowi wprost, czego brakuje.
       Jeśli strona wymaga logowania, wykonawca sam zatrzyma się i poprosi usera — nie podawaj haseł.
       Operacje wrażliwe (wysłanie formularza, zakup, usunięcie) wykonawca potwierdza z userem.
       target="desktop" = osobne środowisko: cały komputer usera (macOS: aplikacje, pliki, okna):

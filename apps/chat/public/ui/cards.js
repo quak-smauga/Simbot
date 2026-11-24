@@ -14,8 +14,10 @@ const SHIM_MS = 1800;
 export const shimmer = (text, from) => `<span class="shim" style="animation-delay:-${Date.now() % SHIM_MS}ms">${esc(text)}</span><span class="tst__t" data-since="${from || Date.now()}">${since(Date.now() - (from || Date.now()))}</span>`;
 setInterval(() => { const now = Date.now(); document.querySelectorAll('[data-since]').forEach(el => { el.textContent = since(now - Number(el.dataset.since)); }); }, 500);
 const plural = n => (n === 1 ? 'krok' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'kroki' : 'kroków');
-const argOf = a => (a && (a._ || a.query || a.task || a.goal)) || '';
-const STATE_PL = { queued: 'w kolejce', running: 'pracuje', waiting_user: 'czeka na Ciebie', paused: 'pauza', succeeded: 'gotowe', failed: 'błąd', cancelled: 'anulowane', pending: 'budzę agenta' };
+/** cel bez kryteriów <done_when> (te są w planie jako etapy) */
+const goalText = v => String(v ?? '').replace(/<done_when>[\s\S]*?<\/done_when>/gi, ' ').replace(/\s+/g, ' ').trim();
+const argOf = a => goalText(a && (a._ || a.query || a.task || a.goal));
+const STATE_PL = { queued: 'w kolejce', running: 'pracuje', waiting_user: 'czeka na Ciebie', paused: 'pauza', succeeded: 'gotowe', partial: 'częściowo', failed: 'błąd', cancelled: 'anulowane', pending: 'budzę agenta' };
 const STEP_PL = { pending: '·', running: '…', completed: '✓', failed: '✗', skipped: '–', waiting_user: '⏸' };
 const REASON_PL = { LOGIN_REQUIRED: '🔐 Zaloguj się', CONFIRM_ACTION: '⚠️ Potwierdź', CAPTCHA: '🧩 Captcha', USER_CONTROL: '🖱 Masz kontrolę', OTHER: '✋ Potrzebna pomoc' };
 const KIND_PL = { 'web.query': 'szukam', 'computer.run': 'przeglądarka', 'memory.search': 'przypominam sobie', plan: 'plan' };
@@ -108,7 +110,8 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
       case 'task.waiting': card.state = 'waiting_user'; card.waiting = { reason: e.reason, message: e.message, screenshotId: e.screenshotId, url: e.url, action: e.action, details: e.details }; if (!card.el.classList.contains('open')) { card.el.classList.add('open'); card.autoOpen = true; } focus(card, 'ask'); break;
       case 'task.resumed': card.state = 'running'; card.waiting = null; if (card.autoOpen) { card.el.classList.remove('open'); card.autoOpen = false; } break;
       case 'task.paused': card.state = 'paused'; break;
-      case 'task.succeeded': card.state = e.ok === false ? 'failed' : 'succeeded'; card.parts = e.parts || []; card.waiting = null; card.ms = ts(e) - card.startedAt; break;
+      // partial = narzędzie oddało wynik, ale nie wszystko się udało (computer.run: niespełnione wymagania) — to nie „błąd”
+      case 'task.succeeded': { const bad = (e.parts || []).filter(p => !p.ok); card.state = e.ok !== false ? 'succeeded' : bad.length && bad.every(p => p.status === 'partial') ? 'partial' : 'failed'; } card.parts = e.parts || []; card.waiting = null; card.ms = ts(e) - card.startedAt; break;
       case 'task.failed': card.state = 'failed'; card.error = e.error; card.waiting = null; break;
       case 'task.cancelled': card.state = 'cancelled'; card.waiting = null; break;
       case 'plan.started': card.kind = 'plan'; card.steps = (e.steps || []).map(s => ({ ...s, status: 'pending', args: (card.steps.find(x => x.id === s.id) || {}).args })); break;
@@ -122,7 +125,8 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
       case 'computer.started': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.goal = e.goal; t.mode = e.mode; break; }
       case 'computer.observation': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.url = e.url; t.title = e.title; if (e.screenshotId) { t.shots.push({ id: e.screenshotId, url: e.url, title: e.title }); if (t.shots.length > 12) t.shots.shift(); } break; }
       case 'computer.action': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); const last = t.log.at(-1); if (last && last.step === e.step && last.label === e.label) { last.status = e.status; last.error = e.error; if (e.outcome) last.outcome = e.outcome; } else t.log.push({ step: e.step, label: e.label, status: e.status, error: e.error, think: e.think, at: ts(e) }); if (t.log.length > 40) t.log.shift(); break; }
-      case 'computer.completed': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = e.result; t.ok = true; break; }
+      case 'computer.completed': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = e.result; t.partial = e.status === 'partial'; t.ok = !t.partial; break; }
+      case 'computer.verify': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); const miss = (e.unmet || []).map(u => `${u.title}${u.why ? ` (${u.why})` : ''}`).join('; '); t.log.push({ label: e.repair ? `🔎 weryfikacja: jeszcze nie koniec — brakuje: ${miss}. Wykonawca dostaje ${e.steps || 'kilka'} kroków na poprawkę` : e.ok && !miss ? '🔎 weryfikacja: wszystkie wymagania potwierdzone' : `🔎 weryfikacja: ${e.ok ? 'niepotwierdzone' : 'nie wszystko zrobione'} — ${miss}`, status: 'completed', at: ts(e) }); break; }
       case 'computer.failed': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = e.error; t.ok = false; break; }
       case 'computer.cancelled': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.result = 'anulowane przez Ciebie — sim dostał raport z tego, co zdążył zrobić'; t.ok = false; break; }
       case 'computer.note': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.log.push({ label: `📝 ${e.text}`, status: 'completed', at: ts(e) }); if (t.log.length > 40) t.log.shift(); break; }
@@ -130,10 +134,10 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
       case 'computer.stage': {
         const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run');
         // done = zaliczony (auto: przez executor z warunku planu, by = dowód) · unconfirmed = zadanie skończone bez zaliczenia etapu · skipped = stare zapisy
-        const status = e.status === 'done' ? 'done' : e.status === 'unconfirmed' ? 'unconfirmed' : 'skipped';
-        const st = t.plan?.stages.find(x => x.id === e.id); if (st) { st.status = status; st.by = e.by; }
+        const status = ['done', 'unconfirmed', 'unmet'].includes(e.status) ? e.status : 'skipped';
+        const st = t.plan?.stages.find(x => x.id === e.id); if (st) { st.status = status; st.by = e.by; st.why = e.why; }
         const nx = t.plan?.stages.find(x => x.id === e.next); if (nx && nx.status !== 'done') nx.status = 'doing';
-        t.log.push({ label: status === 'done' ? `✓ etap ${e.id}: ${e.title}${e.auto ? ` — zaliczony automatycznie${e.by ? ` (${e.by})` : ''}` : ''}` : status === 'unconfirmed' ? `? etap ${e.id} niepotwierdzony: ${e.title}` : `– etap ${e.id} pominięty: ${e.title}`, status: 'completed', at: ts(e) });
+        t.log.push({ label: status === 'done' ? `✓ etap ${e.id}: ${e.title}${e.auto ? ` — zaliczony automatycznie${e.by ? ` (${e.by})` : ''}` : e.by && e.by !== 'decydent' ? ` — ${e.by}` : ''}` : status === 'unconfirmed' ? `? etap ${e.id} niepotwierdzony: ${e.title}${e.why ? ` — ${e.why}` : ''}` : status === 'unmet' ? `✗ etap ${e.id} niezrobiony: ${e.title}${e.why ? ` — ${e.why}` : ''}` : `– etap ${e.id} pominięty: ${e.title}`, status: 'completed', at: ts(e) });
         break;
       }
       case 'computer.resumed': { const t = toolFor(card, key({ ...e, name: 'computer.run' }), 'computer.run'); t.log.push({ label: '▶ wznowione — sprawdzam, co się zmieniło', status: 'completed', at: ts(e) }); break; }
@@ -169,7 +173,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
       if (t.title) return t.title;
     }
     if (t && t.name === 'web.query') return t.results ? `${t.results.length} wyn. · ${t.query}` : t.progress || t.query || '';
-    const arg = card.calls[0] && card.calls[0].args && card.calls[0].args._;
+    const arg = goalText(card.calls[0] && card.calls[0].args && card.calls[0].args._);
     return arg || STATE_PL[card.state] || '';
   }
 
@@ -205,7 +209,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
     const t = mainTool(card);
     const shot = t && t.shots && t.shots.at(-1);
     const thumb = shot ? `<img class="tst__thumb" src="${shotUrl(shot.id)}" alt="" />` : '';
-    const ended = ['succeeded', 'failed', 'cancelled'].includes(card.state);
+    const ended = ['succeeded', 'partial', 'failed', 'cancelled'].includes(card.state);
     if (card.local) {
       if (!ended) return nowRow(card, `przypominam sobie: ${labelOf(card)}`, card.startedAt, chev);
       return row(`tst--end tst--${card.state}`, card.state === 'succeeded' ? '✓' : '✗', `przypominam sobie · ${labelOf(card)}`, '', chev);
@@ -214,8 +218,11 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
     if (ended) {
       // „N kroków” = akcje wykonawcy; notatki, etapy i plan to wpisy w przebiegu, nie kroki
       const n = L.filter(l => l.act !== false).length;
-      const txt = card.state === 'succeeded' ? `${kindOf(card)}${n > 1 ? ` · ${n} ${plural(n)}` : ''}` : card.state === 'failed' ? `${kindOf(card)} · ${card.error || (t && t.result) || 'błąd'}` : `${kindOf(card)} · anulowane`;
-      return row(`tst--end tst--${card.state}`, card.state === 'succeeded' ? '✓' : card.state === 'failed' ? '✗' : '–', txt, card.ms != null ? ms(card.ms) : '', thumb + chev);
+      // częściowo: ile wymagań (etapów planu) potwierdzonych — klik pokazuje, czego brakuje
+      const reqs = (t && t.plan && t.plan.stages) || [];
+      const part = reqs.length ? ` · ${reqs.filter(q => q.status === 'done').length}/${reqs.length} wymagań` : '';
+      const txt = card.state === 'succeeded' ? `${kindOf(card)}${n > 1 ? ` · ${n} ${plural(n)}` : ''}` : card.state === 'partial' ? `${kindOf(card)} · częściowo${part}` : card.state === 'failed' ? `${kindOf(card)} · ${card.error || (t && t.result) || 'błąd'}` : `${kindOf(card)} · anulowane`;
+      return row(`tst--end tst--${card.state}`, card.state === 'succeeded' ? '✓' : card.state === 'partial' ? '⚠' : card.state === 'failed' ? '✗' : '–', txt, card.ms != null ? ms(card.ms) : '', thumb + chev);
     }
     const stopped = card.state === 'waiting_user' || card.state === 'paused';
     const cur = !stopped && L.length ? L.pop() : null;
@@ -266,12 +273,12 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
   function toolStatus(card, name) {
     const t = [...card.tools.values()].find(t => t.name === name);
     if (t) return t.status;
-    return card.state === 'running' ? 'running' : card.state === 'succeeded' ? 'completed' : card.state === 'failed' || card.state === 'cancelled' ? 'failed' : 'pending';
+    return card.state === 'running' ? 'running' : card.state === 'succeeded' || card.state === 'partial' ? 'completed' : card.state === 'failed' || card.state === 'cancelled' ? 'failed' : 'pending';
   }
   function renderStep(card, s) {
     const t = s.id ? card.tools.get(s.id) : [...card.tools.values()].find(t => t.name === s.name);
     const status = t && t.status !== 'running' ? t.status : s.status;
-    const arg = (s.args && (s.args._ || s.args.query || s.args.task)) || (t && (t.goal || t.query)) || '';
+    const arg = goalText(s.args && (s.args._ || s.args.query || s.args.task)) || (t && (t.goal || t.query)) || '';
     const part = card.parts && card.parts.find(p => (s.id ? p.stepId === s.id : p.name === s.name));
     let inner = `<div class="step__name"><b>${esc(s.name)}</b>${s.id ? `<span>#${esc(s.id)}</span>` : ''}${s.after && s.after.length ? `<span>← ${s.after.map(esc).join(', ')}</span>` : ''}${s.ms ? `<span>${ms(s.ms)}</span>` : ''}</div>`;
     if (arg) inner += `<div class="step__arg">${esc(arg)}</div>`;
@@ -290,7 +297,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
       const shot = t.shots.at(-1);
       h += shot ? `<div class="shot"><img src="${shotUrl(shot.id)}" alt="" loading="lazy" /><div class="shot__url">${esc(shot.title ? `${shot.title} — ` : '')}${esc(shot.url || '')}</div></div>` : status === 'running' ? skeleton({ lines: 1, block: true }) : '';
       if (t.log.length) h += `<div class="actions">${t.log.slice(-5).map(a => a.err ? `<div class="err">✗ ${esc(a.err)}</div>` : `<div class="${a.status === 'started' ? 'cur' : a.status === 'failed' ? 'err' : ''}">${a.step ? `${a.step}. ` : ''}${esc(a.label)}${a.status === 'failed' ? ` — ${esc(a.error || 'błąd')}` : a.status === 'started' ? ' …' : ''}${a.think ? ` <span class="think">· ${esc(a.think)}</span>` : ''}</div>`).join('')}</div>`;
-      if (t.result) h += `<div class="result${t.ok ? '' : ' bad'}">${esc(t.result)}</div>`;
+      if (t.result) h += `<div class="result${t.ok ? '' : t.partial ? ' part' : ' bad'}">${esc(t.result)}</div>`;
     } else if (t.log.length) h += `<div class="actions">${t.log.slice(-5).map(a => `<div>${esc(a.label || a.err)}</div>`).join('')}</div>`;
     return h;
   }
@@ -313,7 +320,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
   function renderFlowStep(card, s) {
     const t = s.id ? card.tools.get(s.id) : [...card.tools.values()].find(t => t.name === s.name);
     const status = t && t.status !== 'running' ? t.status : s.status;
-    const arg = (s.args && (s.args._ || s.args.query || s.args.task)) || (t && (t.goal || t.query)) || '';
+    const arg = goalText(s.args && (s.args._ || s.args.query || s.args.task)) || (t && (t.goal || t.query)) || '';
     const part = card.parts && card.parts.find(p => (s.id ? p.stepId === s.id : p.name === s.name));
     let inner = `<div class="fstep__name"><b>${esc(kindName(s.name, s.args, t))}</b><small>${esc(s.name)}${s.id ? ` #${esc(s.id)}` : ''}${s.after && s.after.length ? ` ← ${s.after.map(esc).join(', ')}` : ''}${s.ms ? ` · ${ms(s.ms)}` : ''}</small></div>`;
     if (arg) inner += `<div class="fstep__arg">${esc(arg)}</div>`;
@@ -331,10 +338,10 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
     } else if (t.name === 'computer.run') {
       const shot = t.shots.at(-1);
       h += shot ? `<div class="shot" data-shot><img src="${shotUrl(shot.id)}" alt="" /><div class="shot__url">${esc(shot.title ? `${shot.title} — ` : '')}${esc(shot.url || '')}</div></div>` : status === 'running' ? skeleton({ lines: 1, block: true }) : '';
-      if (t.plan?.stages.length) h += `<div class="flog">${t.plan.stages.map(st => `<div class="${st.status === 'doing' ? 'cur' : ''}"><span>${st.status === 'done' ? '✓' : st.status === 'unconfirmed' ? '?' : st.status === 'skipped' ? '–' : st.status === 'doing' ? '→' : '·'}</span><span>${esc(st.title)}${st.status === 'done' && st.by ? `<div class="think">zaliczony: ${esc(st.by)}</div>` : st.status === 'unconfirmed' ? '<div class="think">niepotwierdzony — zadanie zakończone bez zaliczenia tego etapu</div>' : st.doneWhen ? `<div class="think">zrobione, gdy: ${esc(st.doneWhen)}</div>` : ''}</span></div>`).join('')}</div>`;
+      if (t.plan?.stages.length) h += `<div class="flog">${t.plan.stages.map(st => `<div class="${st.status === 'doing' ? 'cur' : ''}"><span>${st.status === 'done' ? '✓' : st.status === 'unconfirmed' ? '?' : st.status === 'unmet' ? '✗' : st.status === 'skipped' ? '–' : st.status === 'doing' ? '→' : '·'}</span><span>${esc(st.title)}${st.status === 'done' && st.by ? `<div class="think">zaliczony: ${esc(st.by)}</div>` : st.status === 'unconfirmed' ? `<div class="think">niepotwierdzone${st.why ? `: ${esc(st.why)}` : ''}</div>` : st.status === 'unmet' ? `<div class="think">niezrobione${st.why ? `: ${esc(st.why)}` : ''}</div>` : st.doneWhen ? `<div class="think">zrobione, gdy: ${esc(st.doneWhen)}</div>` : ''}</span></div>`).join('')}</div>`;
       if (t.shots.length > 1) h += `<div class="shots">${t.shots.map((sh, i) => `<img src="${shotUrl(sh.id)}" alt="" class="${i === t.shots.length - 1 ? 'on' : ''}" data-url="${esc(sh.url || '')}" data-title="${esc(sh.title || '')}" loading="lazy" />`).join('')}</div>`;
       if (t.log.length) h += `<div class="flog">${t.log.map(a => a.err ? `<div class="err"><span>✗</span><span>${esc(a.err)}</span></div>` : `<div class="${a.status === 'started' ? 'cur' : a.status === 'failed' ? 'err' : ''}"><span>${a.step || ''}</span><span>${esc(a.label)}${a.status === 'failed' ? ` — ${esc(a.error || 'błąd')}` : a.status === 'started' ? ' …' : ''}${a.think ? `<div class="think">${esc(a.think)}</div>` : ''}${a.outcome && a.status !== 'failed' ? `<div class="think outcome">→ ${esc(a.outcome.length > 240 ? a.outcome.slice(0, 240) + '…' : a.outcome)}</div>` : ''}</span></div>`).join('')}</div>`;
-      if (t.result) h += `<div class="result${t.ok ? '' : ' bad'}">${esc(t.result)}</div>`;
+      if (t.result) h += `<div class="result${t.ok ? '' : t.partial ? ' part' : ' bad'}">${esc(t.result)}</div>`;
     } else if (t.log.length) h += `<div class="flog">${t.log.map(a => `<div><span></span><span>${esc(a.label || a.err)}</span></div>`).join('')}</div>`;
     return h;
   }

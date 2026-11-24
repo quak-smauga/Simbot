@@ -56,7 +56,7 @@ function reduce(t, m) {
     case 'task.waiting': task.state = 'waiting_user'; task.waiting = { reason: m.reason, message: m.message, title: m.title, details: m.details, action: m.action }; if (m.step) task.step = m.step; if (m.maxSteps) task.maxSteps = m.maxSteps; if (m.screenshotId) task.shotId = m.screenshotId; break;
     case 'task.resumed': task.state = 'running'; task.waiting = null; break;
     case 'task.paused': task.state = 'paused'; break;
-    case 'task.succeeded': task.state = m.ok === false ? 'failed' : 'succeeded'; task.waiting = null; if (!task.result) task.result = (m.parts || []).map(p => p.text).filter(Boolean).join(' ').slice(0, 400); break;
+    case 'task.succeeded': task.state = m.ok !== false || (m.parts || []).filter(p => !p.ok).every(p => p.status === 'partial') ? 'succeeded' : 'failed'; task.waiting = null; if (!task.result) task.result = (m.parts || []).map(p => p.text).filter(Boolean).join(' ').slice(0, 400); break;
     case 'task.failed': task.state = 'failed'; task.waiting = null; task.result = m.error || task.result; break;
     case 'task.cancelled': task.state = 'cancelled'; task.waiting = null; task.result = 'Anulowane.'; break;
     case 'plan.started': task.kind = 'plan'; task.steps = (m.steps || []).map(s => ({ id: s.id, name: s.name, status: 'pending' })); break;

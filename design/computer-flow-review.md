@@ -181,7 +181,31 @@ Kroki 8–10 i 12 zmieniają kontrakt: wpis w `status/changelog.md` i aktualizac
 
 **Zrobione po powtórce** (ten sam dzień): punkty 1–3 naprawione, do tego **krok 7** (ramki jako `[N]`, nowe karty). Na żywym joemonster.org reklama na stronie filmu dostaje `[1001] button "(ikona: zamknij)"` i klik po numerze ją zamyka. Punkt 4 i status `ok` to zakres kroków 8–10.
 
-**Zostało:** kroki 8–12, potem druga powtórka trzech zadań.
+**Druga powtórka (po kroku 7):** joemonster ✓ (reklama zamknięta, 8 kroków), xkcd ✓ w 2 krokach, leafly ✗ merytorycznie. Z eventów:
+
+- leafly: planner dał etapowi „Filtr ustawiony” warunek `url_contains: leafly.com/strains`, etapowi „Dane odczytane” `text_contains: THC`, a etapowi „odmiana inna niż Gelato” regex pasujący do `/strains/lists`. Wszystkie trzy zaliczyły się same, zanim cokolwiek zrobiono. Raport: „Filtr Hybrid został użyty” przy trzech krokach bez żadnego filtra.
+- xkcd: „Opis komiksu odczytany” zaliczony z samego adresu; opis fabuły zmyślony z obrazka.
+
+Czyli warunki z adresu nadają się tylko do stanu strony. To potwierdziło B2 (typy wymagań) i zdecydowało o kształcie kroku 9.
+
+**Faza 2 (kroki 8–12): wdrożona.**
+
+| Krok | Jak wyszło w kodzie |
+|---|---|
+| 8 | `Stage.kind`: `state` / `action` / `info`; `check` tylko dla `state`; planner ma zakaz gubienia poleceń z celu |
+| 9 | decydent rozlicza etapy w `done.stages` (krok albo cytat); executor sprawdza dowody; jedno podejście naprawcze (8 kroków); `blocked` → od razu `partial`; informacja bez cytatu → `?`, status zostaje `ok` |
+| 10 | raport: `WYMAGANIA`, `DOWODY Z EKRANU`; UI: `⚠ częściowo · N/M wymagań`, weryfikacja w przebiegu |
+| 11 | reguła w ekstrakcji pamięci: potknięcia wykonawcy to nie nauczki o stronie |
+| 12 | `<done_when>` od sima; wymaganie zgubione przez planner wraca jako etap; zaliczone przetrwa replan |
+
+Sędziego haiku nie ma (B3): rzeczy rozmyte ocenia Sima na podstawie `?` w raporcie.
+
+**Znane ograniczenia, do obserwacji w testach:**
+
+- „Jeden krok nie jest dowodem dwóch etapów” może odrzucić uczciwy przypadek, gdy planner rozbije jedną akcję na etap-akcję i etap-stan. Planner ma tego nie robić; jeśli będzie, poluzować regułę.
+- Cytat musi być z tekstu strony w jej języku. Decydent, który tłumaczy („hybryda” zamiast „Hybrid”), dostanie `?`.
+- Wszystko powyżej jest sprawdzone testami na atrapie i na Chromium, ale **nie z prawdziwym modelem**. Trzecia powtórka trzech zadań jest kryterium odbioru.
+
 
 ## F. Znaczniki na zrzucie: dlaczego nie teraz
 

@@ -7,6 +7,19 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-24 — computer: status mówi prawdę (faza 2)
+
+Druga powtórka testów: na leafly etap „Filtr ustawiony” zaliczył się sam, bo planner dał mu warunek „adres zawiera /strains”, a raport twierdził, że filtr został użyty. Na xkcd etap „opis odczytany” zaliczył sam adres.
+
+- **Typy etapów** (`Stage.kind`: `state` / `action` / `info`) i dowód zależny od typu: warunek na adres/tekst, krok zmieniający stronę, dosłowny cytat z tekstu strony. Warunek `check` działa już tylko dla `state`.
+- **Weryfikacja `done`** w kodzie (event `computer.verify`): decydent rozlicza etapy w polu `stages`, executor sprawdza dowody. Braki → jedno podejście naprawcze (do 8 kroków), potem `partial` z listą. Status `ok` nie zależy już od słowa decydenta. Tylko przeglądarka.
+- Nowe statusy etapu: `unmet` (obok `done`, `unconfirmed`); `computer.stage` niesie `kind`, `by`, `why`. `computer.completed` może mieć `status: partial` i `unmet[]`.
+- **Raport**: sekcje `WYMAGANIA` (zamiast `PLAN`) i `DOWODY Z EKRANU`; `NIE ZADZIAŁAŁO` opisane jako potknięcia wykonawcy; `ToolResult.data.requirements`.
+- **`<done_when>`** w treści `computer.run`: kryteria od sima, których planner nie może pominąć (`splitGoal`, `PlannerInput.required`, `Stage.req`). Opis w `capability.yaml`.
+- Pamięć simów: reguła, że z potknięć wykonawcy nie zapisuje się nauczek o stronie (`apps/chat/src/bots.ts`).
+- UI: `⚠ częściowo · N/M wymagań` zamiast „błąd”, weryfikacja w przebiegu; chat zapisuje `computer.verify`.
+- Strony docsów: [Computer](/capabilities/computer/), [Eventy](/events/), [Testy](/development/testing/), [UI](/components/ui/).
+
 ## 2026-11-24 — computer: ramki, nowe karty i poprawki po powtórce testów
 
 Powtórka trzech zadań po fazie 1: xkcd w 2 krokach, leafly bez fałszywego błędu, joemonster dalej z kłopotem. Z eventów i zrzutów: klik `click_at` trafił w „Zamknij X” i zamknął reklamę, a efekt akcji brzmiał „bez zmian”.

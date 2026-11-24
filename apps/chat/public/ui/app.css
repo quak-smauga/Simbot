@@ -920,3 +920,9 @@ body[data-nav="open"] .nav { transform: none; }
 /* sim „myśli” (LLM call) — wiadomość-zaślepka z shimmerem, zamieniana w odpowiedź przy pierwszej delcie */
 .msg--thinking .msg__body { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); min-height: 26px; }
 .msg--thinking .msg__meta { display: none; }
+
+/* computer.run „częściowo”: wynik jest, ale nie wszystkie wymagania potwierdzone — ostrzeżenie, nie błąd */
+.tst--end.tst--partial { color: var(--ink-2); }
+.tst--end.tst--partial .tst__ic { color: var(--warn); }
+.result.part { border-left: 3px solid var(--warn); }
+.flow__sub .chip[data-s="partial"] i { background: var(--warn); }

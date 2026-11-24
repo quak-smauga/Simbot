@@ -9,7 +9,11 @@ export type ConfirmDetail = { label: string; value: string };
 
 /** Każda akcja może nieść "note" — fakt zebrany na tej stronie (executor trzyma notatki przez cały task i oddaje je w raporcie). */
 /** stage/stage_done = postęp planu (który etap i czy właśnie zrobiony), expect = co ma być widać po tej akcji (sprawdzane w następnym kroku). */
-export type Decision = { note?: string; stage?: number; stage_done?: boolean; expect?: string } & (
+/**
+ * Dowód przy zaliczaniu etapu (stage_done): proof_step = numer kroku, którym wykonano akcję (etap „akcja”),
+ * proof_quote = dosłowny fragment tekstu strony (etap „informacja”). Executor sprawdza dowód — bez niego etap nie jest zaliczony.
+ */
+export type Decision = { note?: string; stage?: number; stage_done?: boolean; proof_step?: number; proof_quote?: string; expect?: string } & (
   | { action: "navigate"; url: string; think?: string }
   | { action: "click"; target: number; think?: string; confirm?: string; details?: ConfirmDetail[] }
   | { action: "click_at"; x: number; y: number; think?: string; confirm?: string; details?: ConfirmDetail[] }
@@ -21,9 +25,12 @@ export type Decision = { note?: string; stage?: number; stage_done?: boolean; ex
   | { action: "back"; think?: string }
   | { action: "open_app"; app: string; think?: string; confirm?: string; details?: ConfirmDetail[] }
   | { action: "needs_user"; reason: "LOGIN_REQUIRED" | "CAPTCHA" | "OTHER"; message: string; think?: string }
-  | { action: "done"; result: string; think?: string }
+  | { action: "done"; result: string; think?: string; stages?: StageClaim[] }
   | { action: "fail"; error: string; think?: string }
 );
+
+/** Rozliczenie jednego etapu w "done": zrobiony (z dowodem: step albo quote) albo nie (why; blocked = nie da się, np. logowanie). */
+export type StageClaim = { id: number; met?: boolean; step?: number; quote?: string; why?: string; blocked?: boolean };
 
 export interface DeciderInput {
   goal: string;
@@ -59,7 +66,7 @@ Akcje (zwróć tylko obiekt JSON, bez komentarzy wokół):
 {"action":"wait","ms":1500}                                   – gdy strona się ładuje / coś animuje
 {"action":"back"}
 {"action":"needs_user","reason":"LOGIN_REQUIRED|CAPTCHA|OTHER","message":"co user ma zrobić"}
-{"action":"done","result":"krótki raport PO POLSKU: co znalazłeś / co zrobiłeś (2–6 zdań, konkretne fakty, bez adresów URL)"}
+{"action":"done","result":"krótki raport PO POLSKU: co znalazłeś / co zrobiłeś (2–6 zdań, konkretne fakty, bez adresów URL)","stages":[{"id":3,"met":true,"step":4},{"id":4,"met":true,"quote":"THC 21%"},{"id":5,"met":false,"why":"filtr nie reagował na kliknięcie","blocked":false}]}
 {"action":"fail","error":"dlaczego się nie da"}
 
 Każda akcja może mieć "think":"krótko dlaczego" — MAKSYMALNIE 12 słów.
@@ -88,9 +95,14 @@ Zasady:
 - "wait" to wyjątek, nie nawyk: najwyżej raz z rzędu. Jeśli po wait obserwacja wygląda tak samo — działaj na tym, co jest (click/scroll/navigate), albo "done"/"fail". Hint OBSERVE_FALLBACK znaczy, że lista elementów jest uproszczona, ale prawdziwa — używaj jej, nie czekaj.
 PLAN I POSTĘP (gdy w wejściu jest sekcja PLAN):
 - Pracuj na bieżącym etapie (→). Do KAŻDEJ akcji dodaj "stage":N (numer etapu) i "expect":"co ma być widać po tej akcji" (max 15 słów).
-- Gdy warunek „zrobione, gdy” bieżącego etapu jest spełniony NA OBSERWACJI — dodaj "stage_done":true (może być razem z następną akcją albo z "done").
-- Etapy z dopiskiem [executor sprawdza sam] zalicza executor — w logu zobaczysz „✓ etap N … ZALICZONY AUTOMATYCZNIE”, a w PLANIE „✓ … ZROBIONY”. Taki etap jest zrobiony na pewno: nie powtarzaj akcji, która do niego doprowadziła, przejdź do następnego (albo "done", jeśli to był ostatni).
-- PRZED każdą akcją sprawdź, czy CEL nie jest już spełniony na ekranie. Jeśli tak — od razu "done". Gdy wszystkie etapy mają ✓ — "done", nie szukaj dodatkowej pracy.
+- Każdy etap ma typ w nawiasie i od typu zależy, jak go zaliczyć. Executor SPRAWDZA dowód — etap bez poprawnego dowodu nie jest zaliczony:
+  · [stan] z dopiskiem [executor sprawdza sam] — nic nie zgłaszasz. W logu zobaczysz „✓ etap N … ZALICZONY AUTOMATYCZNIE”: etap jest zrobiony na pewno, nie powtarzaj akcji, która do niego doprowadziła.
+  · [stan] bez tego dopisku — gdy warunek jest spełniony NA OBSERWACJI: "stage_done":true.
+  · [akcja] (ustaw filtr, posortuj, wyślij formularz) — najpierw WYKONAJ tę akcję (click / type / press na właściwej kontrolce), a gdy w logu jej efekt to zmiana strony, zalicz: "stage_done":true,"stage":N,"proof_step":K, gdzie K = numer tego kroku. Wejście na stronę albo otwarcie podstrony to NIE jest ustawienie filtra. Jeden krok nie może być dowodem dwóch etapów.
+  · [informacja] (podaj cenę, parametry, opis) — "stage_done":true,"stage":N,"proof_quote":"dosłowny fragment TEKSTU STRONY z tą informacją". Cytat ma być w języku strony, dokładnie jak na stronie (nie tłumaczenie, nie streszczenie), 3–80 znaków. Jeśli coś widzisz tylko na zrzucie (obrazek, komiks, film) — nie wymyślaj cytatu: zostaw etap bez dowodu i napisz w "result", że to opis z obrazu.
+- "done" ZAWSZE z polem "stages": rozlicz każdy etap, który w PLANIE nie ma ✓ — {"id":N,"met":true,"step":K} albo {"id":N,"met":true,"quote":"…"} albo uczciwie {"id":N,"met":false,"why":"co poszło nie tak","blocked":false}. "blocked":true tylko gdy się NIE DA (logowanie, captcha, takiej funkcji nie ma na stronie). Nie pisz w "result", że coś zrobiłeś, jeśli w logu nie ma kroku, który to zrobił.
+- Komunikat WERYFIKACJA w logu = executor sprawdził Twoje "done" i czegoś brakuje. Zrób dokładnie to, co wymienia (masz na to kilka kroków), potem "done" jeszcze raz. Jeśli naprawdę się nie da — "done" z "met":false i "blocked":true dla tego etapu.
+- PRZED każdą akcją sprawdź, czy CEL nie jest już spełniony na ekranie. Gdy wszystkie etapy mają ✓ — "done", nie szukaj dodatkowej pracy.
 - Jak dostaniesz PRZEPLANOWANO — trzymaj się nowego planu, poprzednia strategia nie zadziałała.`;
 
 /** Wariant dla całego komputera (macOS): elementy z drzewa Accessibility aktywnego okna, zrzut wybranego ekranu, skróty. */

@@ -17,7 +17,7 @@ import type { Store } from "./store.js";
 /** Eventy, których nie zapisujemy do bazy (za częste albo bez wartości przy odtwarzaniu). */
 const NO_PERSIST = new Set(["session.title", "session.members", "session.workflow", "say.text", "say.start", "say.end", "assistant.message", "user.text", "agent.state", "user.level", "voice.chunk", "voice.end", "voice.played", "voice.abort", "agent.thinking", "log", "user.utterance", "user.heard", "agent.event", "session.voice", "bot.turn", "mention.user", "mention.absent"]);
 /** Z agent servera zapisujemy to, co UI odtwarza jako karty — także plan i etapy computer.run (bez nich panel po przeładowaniu gubił plan). */
-const PERSIST_AGENT = /^(task\.|plan\.|step\.|computer\.(started|needs_user|completed|failed|cancelled|action|observation|note|loop|plan|stage|resumed)|web\.(started|completed)|tool\.|hello\.)/;
+const PERSIST_AGENT = /^(task\.|plan\.|step\.|computer\.(started|needs_user|completed|failed|cancelled|action|observation|note|loop|plan|stage|resumed|verify)|web\.(started|completed)|tool\.|hello\.)/;
 /** sim → sim → sim: tyle maks. ogniw po wiadomości usera. */
 const MAX_CHAIN = 3;
 /** Migawka pamięci w prompcie odświeża się po takiej przerwie (cache promptu i tak już wygasł — odświeżenie nic nie kosztuje). */
