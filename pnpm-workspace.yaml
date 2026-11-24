@@ -1,8 +1,9 @@
 packages:
-  - "packages/*"
-  - "plugins/*"
-  - "apps/*"
-# pnpm 10 nie odpala skryptów instalacyjnych bez zgody: electron ściąga binarkę, esbuild (tsx) swoją
+  - packages/*
+  - plugins/*
+  - apps/*
+
 onlyBuiltDependencies:
   - electron
   - esbuild
+  - sharp
