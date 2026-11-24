@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simbot · loadery pod tekstem</title>
+<style>
+/* zmienne skopiowane z apps/chat/public/ui/app.css, żeby wyglądało jak w apce */
+:root {
+  --q-red: #E8453C; --q-green: #3BB273; --q-blue: #3A7BD5; --q-yellow: #F2C94C;
+  --q-violet: #8B5CF6; --q-pink: #EC6FA8; --q-teal: #2BB5A6; --q-orange: #F08A3C;
+  --bg: #f7f7f5; --panel: #ffffff; --soft: #f0f0ec; --soft-2: #e9e9e4; --line: #e8e8e4;
+  --ink: #1b1b1a; --ink-2: #5b5b57; --ink-3: #a1a19b;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --c: var(--q-violet); /* kolor bota — Simbot = fiolet */
+}
+body.dark {
+  --bg: #111211; --panel: #191a19; --soft: #222321; --soft-2: #2a2b29; --line: #2a2b29;
+  --ink: #f1f1ec; --ink-2: #b7b7b0; --ink-3: #6c6c66;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.6 var(--sans); transition: background .2s, color .2s; }
+header { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.bar { max-width: 1080px; margin: 0 auto; padding: 12px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.bar h1 { font-size: 15px; margin: 0 auto 0 0; font-weight: 650; letter-spacing: -.01em; }
+.seg { display: inline-flex; background: var(--soft); border-radius: 999px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--ink-2); padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+.seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.sw { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--panel); outline: 1px solid var(--line); cursor: pointer; padding: 0; }
+.sw.on { outline: 2px solid var(--ink); }
+main { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+.intro { color: var(--ink-2); max-width: 70ch; margin: 0 0 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+.card__h { padding: 12px 16px 0; display: flex; align-items: baseline; gap: 8px; }
+.card__h b { font-size: 13.5px; }
+.card__h span { font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+.card__d { padding: 2px 16px 0; font-size: 12.5px; color: var(--ink-2); }
+.tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--q-green) 16%, transparent); color: color-mix(in srgb, var(--q-green) 75%, var(--ink)); margin-left: auto; }
+.stage { margin: 12px; padding: 14px 14px 16px; border-radius: 10px; background: var(--bg); flex: 1; }
+
+/* mini wiadomość jak .msg w apce */
+.msg { display: grid; grid-template-columns: 32px 1fr; gap: 12px; }
+.av { width: 32px; height: 32px; border-radius: 50%; background: var(--c); position: relative; }
+.av::before, .av::after { content: ""; position: absolute; top: 11px; width: 7px; height: 9px; border-radius: 50%; background: #fff; }
+.av::before { left: 8px; } .av::after { right: 8px; }
+.who { font-size: 12.5px; color: var(--ink-3); margin-bottom: 2px; } .who b { color: var(--ink); font-weight: 600; font-size: 13px; }
+.body p { margin: 0; }
+.ld { margin-top: 8px; min-height: 20px; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
+.ld .t { font-variant-numeric: tabular-nums; color: var(--ink-3); }
+
+/* ───── 1. kropki (obecne .typing, nieużywane) ───── */
+.l-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3); animation: tp 1.2s infinite; }
+.l-dots { gap: 3px; }
+.l-dots i:nth-child(2) { animation-delay: .2s; } .l-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes tp { 30% { transform: translateY(-4px); } }
+
+/* ───── 2. shimmer tekstu ───── */
+.shim { background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink-3) 40%, var(--ink) 50%, var(--ink-3) 60%, var(--ink-3) 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shim 1.8s linear infinite; font-weight: 500; }
+@keyframes shim { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+.fadeword { display: inline-block; animation: up .35s var(--ease); }
+@keyframes up { from { opacity: 0; transform: translateY(4px); } }
+
+/* ───── 3. kropki Q ───── */
+.l-q { gap: 4px; }
+.l-q i { width: 6px; height: 6px; border-radius: 50%; animation: qhop 1.4s var(--ease) infinite; }
+.l-q i:nth-child(1) { background: var(--q-red); }
+.l-q i:nth-child(2) { background: var(--q-green); animation-delay: .12s; }
+.l-q i:nth-child(3) { background: var(--q-blue); animation-delay: .24s; }
+.l-q i:nth-child(4) { background: var(--q-yellow); animation-delay: .36s; }
+@keyframes qhop { 0%, 60%, 100% { transform: translateY(0) scale(1); } 20% { transform: translateY(-5px) scale(1.1, .9); } 35% { transform: translateY(0) scale(1.15, .85); } }
+
+/* ───── 4. oczka ───── */
+.eyes { display: inline-flex; gap: 3px; padding: 3px 5px; border-radius: 999px; background: var(--c); }
+.eyes i { width: 6px; height: 7px; border-radius: 50%; background: #fff; position: relative; animation: lid 3.2s infinite; }
+.eyes i::after { content: ""; position: absolute; width: 3px; height: 3px; border-radius: 50%; background: #1b1b1a; top: 2px; left: 1.5px; animation: look 3.2s var(--ease) infinite; }
+@keyframes lid { 0%, 44%, 50%, 100% { transform: scaleY(1); } 47% { transform: scaleY(.1); } }
+@keyframes look { 0%, 15% { transform: translate(0, 0); } 25%, 40% { transform: translate(1.5px, -.5px); } 55%, 70% { transform: translate(-1.5px, .5px); } 80%, 100% { transform: translate(0, 0); } }
+
+/* ───── 5. linia ───── */
+.l-line { width: min(220px, 60%); height: 2px; border-radius: 2px; background: var(--soft-2); overflow: hidden; position: relative; }
+.l-line::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: 2px; background: var(--c); animation: slide 1.3s var(--ease) infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* ───── 6. kropka-pastylka ───── */
+.pill { width: 8px; height: 8px; border-radius: 999px; background: var(--c); animation: pill 1.6s var(--ease) infinite; }
+@keyframes pill { 0%, 100% { width: 8px; transform: translateX(0); } 40% { width: 26px; } 60% { width: 8px; transform: translateX(18px); } 80% { width: 26px; transform: translateX(0); } }
+
+/* ───── 7. ticker kroków agenta ───── */
+.ring { width: 12px; height: 12px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--c) 25%, transparent); border-top-color: var(--c); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.step { color: var(--ink-2); }
+.step-wrap { display: inline-grid; overflow: hidden; height: 20px; }
+.step-wrap > span { grid-area: 1 / 1; animation: stepin .4s var(--ease); }
+@keyframes stepin { from { transform: translateY(100%); opacity: 0; } }
+.done { color: var(--ink-3); font-size: 12px; display: flex; flex-direction: column; gap: 1px; margin-top: 6px; }
+.done span::before { content: "✓ "; color: var(--q-green); }
+
+/* ───── 8. braille ───── */
+.braille { font-family: var(--mono); color: var(--c); font-size: 14px; width: 1ch; }
+
+/* ───── 9. fala ───── */
+.wave { display: inline-flex; align-items: center; gap: 2px; height: 14px; }
+.wave i { width: 2.5px; height: 100%; border-radius: 2px; background: var(--c); animation: eq 1s ease-in-out infinite; transform-origin: center; }
+.wave i:nth-child(2) { animation-delay: .1s; } .wave i:nth-child(3) { animation-delay: .2s; } .wave i:nth-child(4) { animation-delay: .3s; } .wave i:nth-child(5) { animation-delay: .4s; }
+@keyframes eq { 0%, 100% { transform: scaleY(.25); } 50% { transform: scaleY(1); } }
+
+/* ───── 10. orbita ───── */
+.orbit { width: 14px; height: 14px; position: relative; flex: none; }
+.orbit::before { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--c); animation: core 1.4s ease-in-out infinite; }
+.orbit::after { content: ""; position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--c); top: 0; left: 5px; transform-origin: 2px 7px; animation: spin 1.1s linear infinite; }
+@keyframes core { 50% { transform: scale(.7); opacity: .6; } }
+
+/* ───── 11. wstawanie (zz → !) ───── */
+.wake { display: inline-flex; align-items: center; gap: 6px; }
+.wake .z { font-weight: 700; font-size: 11px; color: var(--c); animation: zz 1.6s infinite; }
+.wake .z:nth-child(2) { animation-delay: .3s; font-size: 9px; } .wake .z:nth-child(3) { animation-delay: .6s; font-size: 7px; }
+@keyframes zz { 0% { opacity: 0; transform: translate(0, 2px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(3px, -5px); } }
+
+/* ───── 12. chip statusu ───── */
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px 3px 8px; border-radius: 999px; background: var(--soft); color: var(--ink-2); font-size: 12px; }
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); position: relative; }
+.chip .dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--c); animation: ping 1.4s var(--ease) infinite; }
+@keyframes ping { from { transform: scale(1); opacity: .7; } to { transform: scale(2.8); opacity: 0; } }
+
+.rec { margin-top: 36px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+.rec h2 { font-size: 15px; margin: 0 0 8px; }
+.rec table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.rec td, .rec th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.rec th { color: var(--ink-2); font-weight: 600; font-size: 12px; }
+.rec tr:last-child td { border-bottom: 0; }
+
+/* ───── PROTOTYP: shimmer-kroki ───── */
+.proto { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 28px; display: grid; grid-template-columns: 1fr 0; transition: grid-template-columns .4s var(--ease); overflow: hidden; min-height: 380px; }
+.proto.side { grid-template-columns: 1fr 340px; }
+.proto__chat { padding: 18px 20px 20px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.proto__top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.proto__top h2 { font-size: 15px; margin: 0 auto 0 0; }
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; cursor: pointer; }
+.btn:hover { background: var(--soft); }
+.btn--p { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.feed { display: flex; flex-direction: column; gap: 14px; }
+.me { align-self: flex-end; background: var(--soft); padding: 7px 14px; border-radius: 16px 16px 4px 16px; max-width: 70%; }
+/* kroki */
+.steps { margin-top: 8px; display: flex; flex-direction: column; gap: 1px; cursor: pointer; border-radius: 8px; margin-left: -8px; padding: 2px 8px; width: fit-content; max-width: 100%; transition: background .15s; }
+.steps:hover { background: var(--soft); }
+.st { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 22px; min-width: 0; }
+.st__ic { width: 12px; flex: none; display: inline-flex; justify-content: center; font-size: 11px; }
+.st__l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st__t { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
+.st--done { color: var(--ink-3); }
+.st--in { animation: up .3s var(--ease); }
+.st--done .st__ic { color: var(--q-green); }
+.st--now { animation: up .3s var(--ease); }
+.st--now .st__ic::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); animation: core 1.2s ease-in-out infinite; }
+.st--ask { color: var(--q-red); font-weight: 550; }
+.st--ask .st__ic::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--q-red); animation: blink .6s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.st--more { color: var(--ink-3); font-size: 12px; }
+.st__chev { color: var(--ink-3); opacity: 0; transition: opacity .15s; font-size: 12px; }
+.steps:hover .st__chev { opacity: 1; }
+.summary { color: var(--ink-3); }
+.summary .st__ic { color: var(--q-green); }
+/* panel boczny */
+.side__in { border-left: 1px solid var(--line); background: var(--bg); height: 100%; padding: 16px 18px; min-width: 340px; display: flex; flex-direction: column; gap: 10px; }
+.side__h { display: flex; align-items: center; gap: 8px; } .side__h b { flex: 1; font-size: 14px; }
+.side__x { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 16px; }
+.shot { height: 120px; border-radius: 10px; background: linear-gradient(135deg, var(--soft-2), var(--soft)); border: 1px solid var(--line); display: grid; place-items: center; color: var(--ink-3); font-size: 12px; }
+.side__steps { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.side__steps .st { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.notes { font-size: 12.5px; color: var(--ink-2); margin: 0; padding-left: 18px; }
+.notes li { margin: 3px 0; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; } }
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <h1>Simbot · loadery pod tekstem</h1>
+  <div class="seg" id="ctx">
+    <button data-ctx="thinking" class="on">LLM myśli</button>
+    <button data-ctx="working">agent pracuje</button>
+    <button data-ctx="waking">wstaje</button>
+  </div>
+  <div style="display:flex;gap:6px" id="colors"></div>
+  <div class="seg" id="theme"><button data-t="light" class="on">jasny</button><button data-t="dark">ciemny</button></div>
+</div></header>
+
+<main>
+<p class="intro">Każda karta to wiadomość bota z loaderem pod tekstem (miejsce, gdzie dziś nic nie ma — avatar u góry animuje się sam). Przełącz kontekst na górze, żeby zobaczyć teksty dla myślenia, pracy agenta i wstawania. Licznik czasu pojawia się dopiero po 3 s, żeby nie migał przy szybkich odpowiedziach.</p>
+<section class="proto" id="proto">
+  <div class="proto__chat">
+    <div class="proto__top">
+      <h2>Prototyp: shimmer jako krok, panel dopiero po kliknięciu</h2>
+      <div class="seg" id="pmode"><button data-m="all" class="on">wszystkie kroki</button><button data-m="last3">ostatnie 3</button><button data-m="one">tylko bieżący</button></div>
+      <button class="btn" id="pask">zasymuluj „czeka na Ciebie”</button>
+      <button class="btn btn--p" id="prun">▶ odpal od nowa</button>
+    </div>
+    <div class="feed" id="pfeed"></div>
+    <ul class="notes">
+      <li>Bieżący krok = shimmer + licznik po 3 s. Skończony krok przestaje świecić, dostaje ✓ i czas, a nowy pojawia się pod nim.</li>
+      <li>Panel nie otwiera się sam. Klik w kroki otwiera go (na mobile mogłyby się rozwinąć inline).</li>
+      <li>Na koniec lista zwija się do jednej linii „Zrobione · N kroków · czas ›”, też klikalnej.</li>
+      <li>„Czeka na Ciebie” <b>nie</b> jest shimmerem: czerwony, mrugający, bo to musi krzyczeć.</li>
+    </ul>
+  </div>
+  <aside><div class="side__in">
+    <div class="side__h"><b>computer.run · szukam ogłoszenia</b><button class="side__x" id="pclose">✕</button></div>
+    <div class="shot">podgląd ekranu (screenshot)</div>
+    <div class="side__steps" id="pside"></div>
+  </div></aside>
+</section>
+
+<div class="grid" id="grid"></div>
+
+<section class="rec">
+  <h2>Propozycja: co do którego stanu</h2>
+  <table>
+    <tr><th>Stan</th><th>Loader</th><th>Dlaczego</th></tr>
+    <tr><td><b>thinking</b> (LLM call)</td><td>2 · shimmer tekstu + licznik</td><td>Najspokojniejszy, czytelny, zmienia słowa („myśli…”, „zbiera myśli…”), nie konkuruje z animowanym avatarem.</td></tr>
+    <tr><td><b>working</b> (agent / computer.run)</td><td>7 · ticker kroków</td><td>Mówi <i>co</i> się dzieje (z eventów kroków), zrobione kroki zostają jako ✓ — od razu widać postęp.</td></tr>
+    <tr><td><b>wstawanie</b> (start bota / sesji)</td><td>11 · zz → oczka</td><td>Pasuje do charakteru simów; po obudzeniu płynnie przechodzi w zwykły loader.</td></tr>
+    <tr><td><b>listening / speaking</b></td><td>9 · fala</td><td>Naturalny znak dźwięku, kolor bota.</td></tr>
+  </table>
+</section>
+</main>
+
+<script>
+const CTX = {
+  thinking: { who: 'Kropka', text: 'Jasne, już sprawdzam, co się da z tym zrobić.', words: ['myśli…', 'zbiera myśli…', 'układa odpowiedź…'] },
+  working: { who: 'Kropka', text: 'Otwieram przeglądarkę i szukam tego ogłoszenia.', words: ['otwiera przeglądarkę', 'wchodzi na olx.pl', 'zamyka reklamę', 'czyta wyniki'] },
+  waking: { who: 'Kropka', text: '', words: ['wstaje…', 'przeciera oczy…', 'już jest!'] },
+};
+const LOADERS = [
+  { id: 'dots', name: 'Trzy kropki', d: 'Klasyk. Mamy już .typing w CSS — tylko nieużywany.', html: () => `<span class="ld l-dots"><i></i><i></i><i></i></span>` },
+  { id: 'shim', name: 'Shimmer tekstu', rec: 1, d: 'Status jako tekst z przelatującym błyskiem, słowa się zmieniają.', html: () => `<span class="ld"><span class="shim" data-words></span><span class="t" data-timer></span></span>` },
+  { id: 'q', name: 'Kropki Q', d: 'Kolory quak (nie Simbota) — raczej do aplikacji quak.', html: () => `<span class="ld l-q"><i></i><i></i><i></i><i></i></span>` },
+  { id: 'eyes', name: 'Oczka', d: 'Mini oczy bota rozglądają się i mrugają.', html: () => `<span class="ld"><span class="eyes"><i></i><i></i></span><span data-words></span></span>` },
+  { id: 'line', name: 'Linia', d: 'Cienki pasek w kolorze bota, szerokość jak tekst.', html: () => `<span class="ld"><span class="l-line"></span></span>` },
+  { id: 'pill', name: 'Kropka-pastylka', d: 'Jedna kropka rozciąga się i przeskakuje.', html: () => `<span class="ld" style="width:40px"><span class="pill"></span></span>` },
+  { id: 'ticker', name: 'Ticker kroków', rec: 1, d: 'Spinner + aktualny krok agenta, zrobione zostają z ✓.', html: () => `<div class="done" data-done></div><span class="ld"><span class="ring"></span><span class="step-wrap step" data-steps></span><span class="t" data-timer></span></span>` },
+  { id: 'braille', name: 'Braille', d: 'Terminalowy ⠋⠙⠹ + status. Dev-vibe.', html: () => `<span class="ld"><span class="braille" data-braille></span><span data-words></span></span>` },
+  { id: 'wave', name: 'Fala', d: 'Equalizer — dobry do słuchania/mówienia.', html: () => `<span class="ld"><span class="wave"><i></i><i></i><i></i><i></i><i></i></span></span>` },
+  { id: 'orbit', name: 'Orbita', d: 'Kropka krąży wokół pulsującego środka.', html: () => `<span class="ld"><span class="orbit"></span><span data-words></span></span>` },
+  { id: 'wake', name: 'Wstawanie zz → oczka', rec: 1, d: 'Najpierw zz, po chwili oczka się otwierają.', html: () => `<span class="ld" data-wake><span class="wake"><span class="z">z</span><span class="z">z</span><span class="z">z</span></span><span data-words></span></span>` },
+  { id: 'chip', name: 'Chip statusu', d: 'Pastylka z pulsującą kropką, jak .sys.', html: () => `<span class="ld"><span class="chip"><span class="dot"></span><span data-words></span><span class="t" data-timer></span></span></span>` },
+];
+const COLORS = ['violet', 'blue', 'red', 'green', 'pink', 'teal', 'orange'];
+let ctx = 'thinking', timers = [];
+
+function render() {
+  timers.forEach(clearInterval); timers = [];
+  const c = CTX[ctx];
+  document.getElementById('grid').innerHTML = LOADERS.map((l, i) => `
+    <div class="card"><div class="card__h"><span>${String(i + 1).padStart(2, '0')}</span><b>${l.name}</b>${l.rec ? '<span class="tag">polecam</span>' : ''}</div>
+    <div class="card__d">${l.d}</div>
+    <div class="stage"><div class="msg"><div class="av"></div><div><div class="who"><b>${c.who}</b></div>
+      <div class="body">${c.text ? `<p>${c.text}</p>` : ''}${l.html()}</div></div></div></div></div>`).join('');
+  const t0 = Date.now();
+  // zmieniające się słowa
+  document.querySelectorAll('[data-words]').forEach(el => {
+    let i = 0; const set = () => { el.innerHTML = `<span class="fadeword">${c.words[i % c.words.length]}</span>`; i++; };
+    set(); timers.push(setInterval(set, 2200));
+  });
+  // licznik po 3 s
+  document.querySelectorAll('[data-timer]').forEach(el => timers.push(setInterval(() => { const s = (Date.now() - t0) / 1000; el.textContent = s >= 3 ? `· ${Math.floor(s)} s` : ''; }, 250)));
+  // braille
+  const B = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+  document.querySelectorAll('[data-braille]').forEach(el => { let i = 0; timers.push(setInterval(() => el.textContent = B[i++ % B.length], 80)); });
+  // ticker kroków
+  document.querySelectorAll('[data-steps]').forEach(el => {
+    const done = el.closest('.body').querySelector('[data-done]'); let i = 0;
+    const step = () => {
+      if (i > 0 && ctx === 'working') { done.insertAdjacentHTML('beforeend', `<span>${c.words[(i - 1) % c.words.length]}</span>`); if (done.children.length > 3) done.firstChild.remove(); }
+      el.innerHTML = `<span>${c.words[i % c.words.length]}</span>`; i++;
+    };
+    step(); timers.push(setInterval(step, 2400));
+  });
+  // wstawanie: po 3 s zz → oczka
+  document.querySelectorAll('[data-wake]').forEach(el => {
+    timers.push(setInterval(() => {
+      const w = el.querySelector('.wake, .eyes');
+      w.outerHTML = w.classList.contains('wake') ? '<span class="eyes"><i></i><i></i></span>' : '<span class="wake"><span class="z">z</span><span class="z">z</span><span class="z">z</span></span>';
+    }, 3300));
+  });
+}
+
+document.getElementById('ctx').onclick = e => { const b = e.target.closest('button'); if (!b) return; ctx = b.dataset.ctx; [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b)); render(); };
+document.getElementById('theme').onclick = e => { const b = e.target.closest('button'); if (!b) return; document.body.classList.toggle('dark', b.dataset.t === 'dark'); [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b)); };
+const cbox = document.getElementById('colors');
+cbox.innerHTML = COLORS.map((c, i) => `<button class="sw${i ? '' : ' on'}" style="background:var(--q-${c})" data-c="${c}" title="${c}"></button>`).join('');
+cbox.onclick = e => { const b = e.target.closest('button'); if (!b) return; document.documentElement.style.setProperty('--c', `var(--q-${b.dataset.c})`); [...cbox.children].forEach(x => x.classList.toggle('on', x === b)); };
+render();
+
+// ───── prototyp ─────
+const P = {
+  steps: [
+    ['myśli…', 1600], ['otwiera przeglądarkę', 2200], ['wchodzi na olx.pl', 2600], ['zamyka reklamę', 1800],
+    ['wpisuje „rower gravel” w wyszukiwarkę', 2400], ['przegląda wyniki', 3600], ['otwiera ogłoszenie', 2000],
+  ],
+  mode: 'all', done: [], cur: -1, t0: 0, timer: null, next: null, asking: false, finished: false, start: 0,
+};
+const $ = id => document.getElementById(id);
+const fmt = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+function pRender() {
+  const now = Date.now();
+  let rows = P.done.map(([l, ms], i) => `<div class="st st--done${i === P.done.length - 1 ? ' st--in' : ''}"><span class="st__ic">✓</span><span class="st__l">${l}</span><span class="st__t">${fmt(ms)}</span></div>`);
+  if (P.mode === 'last3' && rows.length > 3) rows = [`<div class="st st--more"><span class="st__ic">⋯</span><span>${rows.length - 3} wcześniejsze</span></div>`, ...rows.slice(-3)];
+  if (P.mode === 'one') rows = P.done.length ? [`<div class="st st--more"><span class="st__ic">✓</span><span>${P.done.length} zrobione</span></div>`] : [];
+  if (P.finished) {
+    const total = P.done.reduce((a, [, ms]) => a + ms, 0);
+    rows = [`<div class="st summary"><span class="st__ic">✓</span><span class="st__l">Zrobione · ${P.done.length} kroków · ${fmt(total)}</span><span class="st__chev">›</span></div>`];
+  } else if (P.asking) {
+    rows.push(`<div class="st st--ask"><span class="st__ic"></span><span class="st__l">czeka na Ciebie: zaloguj się na olx.pl</span><span class="st__chev">›</span></div>`);
+  } else if (P.cur >= 0) {
+    const s = (now - P.t0) / 1000;
+    rows.push(`<div class="st st--now"><span class="st__ic"></span><span class="st__l shim">${P.steps[P.cur][0]}</span><span class="st__t">${s >= 3 ? Math.floor(s) + ' s' : ''}</span><span class="st__chev">›</span></div>`);
+  }
+  const el = $('psteps');
+  if (el) el.innerHTML = rows.join('');
+  // panel: zawsze pełna lista
+  $('pside').innerHTML = P.done.map(([l, ms]) => `<div class="st st--done"><span class="st__ic">✓</span><span class="st__l">${l}</span><span class="st__t" style="margin-left:auto">${fmt(ms)}</span></div>`).join('')
+    + (!P.finished && P.cur >= 0 ? `<div class="st ${P.asking ? 'st--ask' : 'st--now'}"><span class="st__ic"></span><span class="st__l ${P.asking ? '' : 'shim'}">${P.asking ? 'czeka na Ciebie' : P.steps[P.cur][0]}</span></div>` : '');
+}
+function pStep() {
+  if (P.cur >= 0) P.done.push([P.steps[P.cur][0], Date.now() - P.t0]);
+  P.cur++;
+  if (P.cur >= P.steps.length) {
+    P.finished = true; P.cur = -1; pRender();
+    $('pfeed').insertAdjacentHTML('beforeend', `<div class="msg" style="animation:up .35s var(--ease)"><div class="av"></div><div><div class="who"><b>Kropka</b></div><div class="body"><p>Mam! Gravel, 2 400 zł, Kraków. Otworzyłem ogłoszenie w przeglądarce.</p></div></div></div>`);
+    return;
+  }
+  P.t0 = Date.now(); pRender();
+  P.next = setTimeout(pStep, P.steps[P.cur][1]);
+}
+function pRun() {
+  clearTimeout(P.next); clearInterval(P.timer);
+  Object.assign(P, { done: [], cur: -1, asking: false, finished: false });
+  $('pfeed').innerHTML = `<div class="me">znajdź mi gravela do 2,5k na olx</div>
+    <div class="msg"><div class="av"></div><div><div class="who"><b>Kropka</b></div><div class="body"><p>Jasne, już szukam.</p><div class="steps" id="psteps" title="pokaż szczegóły"></div></div></div></div>`;
+  $('psteps').onclick = () => $('proto').classList.add('side');
+  P.timer = setInterval(() => { const t = document.querySelector('#psteps .st--now .st__t'); if (t) { const s = (Date.now() - P.t0) / 1000; t.textContent = s >= 3 ? Math.floor(s) + ' s' : ''; } }, 250);
+  pStep();
+}
+$('prun').onclick = pRun;
+$('pclose').onclick = () => $('proto').classList.remove('side');
+$('pask').onclick = () => {
+  if (P.finished || P.cur < 0) return;
+  P.asking = !P.asking; $('pask').textContent = P.asking ? 'użytkownik zrobił → dalej' : 'zasymuluj „czeka na Ciebie”';
+  if (P.asking) clearTimeout(P.next); else { P.t0 = Date.now(); P.next = setTimeout(pStep, 1500); }
+  pRender();
+};
+$('pmode').onclick = e => { const b = e.target.closest('button'); if (!b) return; P.mode = b.dataset.m; [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b)); pRender(); };
+pRun();
+</script>
+</body>
+</html>
