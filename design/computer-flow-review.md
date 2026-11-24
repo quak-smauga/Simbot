@@ -159,6 +159,30 @@ Kroki 8–10 i 12 zmieniają kontrakt: wpis w `status/changelog.md` i aktualizac
 - Sędzia haiku (B3).
 - Siatka dla pętli `click_at`: po kroku 1 i 3 powinna być zbędna.
 
+## G. Stan wdrożenia (24.11.2026, wieczór)
+
+**Faza 1 (kroki 1–6): wdrożona**, commit `51b8b7e`.
+
+**Powtórka trzech zadań po fazie 1:**
+
+| Zadanie | Wynik | Uwagi |
+|---|---|---|
+| xkcd | ✓ 2 kroki (było 4 z trzema losowaniami) | planner dał etapowi „komiks odczytany” sam warunek na URL, więc zaliczył się bez czytania → do kroku 8 (typ „informacja” nie może mieć warunku na adres) |
+| leafly | ✓ wg Kacpra | — |
+| joemonster | ✗ 9 akcji, status `ok` mimo „filmu nie widziałem” | patrz niżej |
+
+**Co wyszło z joemonstera (eventy + zrzuty `shot_mwv2g…`):**
+
+1. `click_at (0.92, 0.04)` **trafił w „Zamknij X” i zamknął reklamę**, a efekt akcji brzmiał „bez zmian · trafiono w: iframe”. Porównywaliśmy adres i tekst; zniknięcie nakładki niczego z tego nie zmienia. Decydent uznał, że się nie udało.
+2. Klik w film przechwycił przycisk Play, który sam był na liście jako `[26]`. Błąd mówił „nakładka: reklama/baner/modal”.
+3. Replan dał warunek `text_contains: "serenad"` na stronie, której tytuł już to słowo zawierał. Etap „treść odczytana” zaliczył się po pierwszej dowolnej akcji.
+4. Opis filmu („Zamawiasz Spider-Mana, a przychodzi to. Ale serce się liczy.”) był na ekranie po zamknięciu reklamy, ale nie trafił do notatek ani raportu.
+5. Sima znowu zapisała nauczkę o narzędziu („reklamy, których nie da się zamknąć”) → krok 11.
+
+**Zrobione po powtórce** (ten sam dzień): punkty 1–3 naprawione, do tego **krok 7** (ramki jako `[N]`, nowe karty). Na żywym joemonster.org reklama na stronie filmu dostaje `[1001] button "(ikona: zamknij)"` i klik po numerze ją zamyka. Punkt 4 i status `ok` to zakres kroków 8–10.
+
+**Zostało:** kroki 8–12, potem druga powtórka trzech zadań.
+
 ## F. Znaczniki na zrzucie: dlaczego nie teraz
 
 Znaczniki (set-of-marks) pomagają modelowi, który **celuje po pikselach**: widzi obraz, musi wskazać miejsce. Nasz decydent celuje po liście z DOM (`click [63]` idzie po selektorze), więc trafianie już mamy. Znaczniki dawałyby tylko skojarzenie „ten numer to ten przycisk na obrazie”.

@@ -254,10 +254,67 @@ export const HIT_SRC = String.raw`function (p) {
   if (t.tagName === "CANVAS" || t.tagName === "VIDEO") return d(t);
   var c = t.closest('a[href], button, input, select, textarea, summary, label, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick]');
   var e = c || t;
-  var txt = String(e.innerText || e.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 40);
+  var full = String(e.innerText || e.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+  // tło/kontener (ma w środku inne elementy) opisujemy bez tekstu — „html „cała strona…”” niczego nie mówi
+  var txt = c || (!e.children.length && full.length <= 60) ? full.slice(0, 40) : "";
   var q = txt ? " „" + txt + "”" : "";
   if (c) return d(c) + q + (c.getAttribute(p.ATTR) ? " = [" + c.getAttribute(p.ATTR) + "] z listy" : "");
   return d(t) + q + (getComputedStyle(t).cursor === "pointer" ? " (klikalne)" : " — NIC KLIKALNEGO w tym punkcie");
+}`;
+
+/**
+ * Elementy WEWNĄTRZ ramki (iframe) — głównie po to, żeby „Zamknij X” reklamy miał numer [N] jak każdy inny przycisk.
+ * Wykonywany w dokumencie ramki. Wejście: { ATTR, startId, max }. Wyjście: [{ id, role, name, href?, x, y, w, h, close }] (px w układzie ramki).
+ * Najpierw elementy wyglądające na zamknięcie (tekst/klasa/aria: zamknij, close, ×), potem reszta od góry.
+ */
+export const FRAME_SRC = String.raw`function (a) {
+  var ATTR = a.ATTR, vw = window.innerWidth, vh = window.innerHeight;
+  var str = function (v) { return typeof v === "string" ? v : ""; };
+  var clean = function (v) { return String(v || "").replace(/\s+/g, " ").trim(); };
+  Array.prototype.forEach.call(document.querySelectorAll("[" + ATTR + "]"), function (e) { e.removeAttribute(ATTR); });
+  var CLOSE = /zamknij|close|dismiss|skip|pomi[nń]|^\s*[x×✕✖]\s*$/i;
+  var picked = [], seen = [];
+  var add = function (el, forced) {
+    if (seen.indexOf(el) !== -1) return;
+    var r = el.getBoundingClientRect();
+    if (r.width < 6 || r.height < 6 || r.bottom <= 0 || r.top >= vh || r.right <= 0 || r.left >= vw) return;
+    var st = getComputedStyle(el);
+    if (st.visibility === "hidden" || st.display === "none" || Number(st.opacity) === 0) return;
+    var tag = el.tagName.toLowerCase();
+    var cls = (typeof el.className === "string" ? el.className : "") + " " + (el.id || "");
+    var name = clean(str(el.getAttribute("aria-label")) || str(el.innerText) || str(el.textContent) || str(el.getAttribute("title")) || str(el.getAttribute("alt")) || str(el.value)).slice(0, 60);
+    var close = CLOSE.test(name) || /close|zamknij|dismiss/i.test(cls);
+    if (!name) { if (!close) return; name = "(ikona: zamknij)"; }
+    if (forced && !close) return;
+    seen.push(el);
+    var raw = tag === "a" ? str(el.getAttribute("href")) : "";
+    var href = "";
+    if (raw && raw.indexOf("javascript:") !== 0) { try { href = new URL(raw, location.href).href.slice(0, 100); } catch (e) {} }
+    picked.push({ el: el, role: tag === "a" ? "link" : el.getAttribute("role") || (tag === "input" ? "textbox" : tag === "div" || tag === "span" ? "button" : tag), name: name, href: href, x: r.left, y: r.top, w: r.width, h: r.height, close: close });
+  };
+  var inter = document.querySelectorAll('a[href], button, input:not([type=hidden]), select, textarea, [role="button"], [role="link"], [onclick]');
+  for (var i = 0; i < inter.length && i < 400; i++) { try { add(inter[i], false); } catch (e) {} }
+  // „Zamknij X” w reklamach to często zwykły div/span z listenerem — bierzemy też krótkie napisy i klasy wyglądające na zamknięcie
+  var maybe = document.querySelectorAll('[class*="close" i], [id*="close" i], [aria-label*="close" i], [aria-label*="zamknij" i], div, span');
+  for (var j = 0; j < maybe.length && j < 1500; j++) {
+    var m = maybe[j];
+    try {
+      var own = clean(m.textContent);
+      if (own.length <= 20 || /close|zamknij/i.test((typeof m.className === "string" ? m.className : "") + " " + (m.id || ""))) { if (!m.querySelector("a, button, [role=button]") ) add(m, true); }
+    } catch (e) {}
+  }
+  picked.sort(function (p, q) { return Number(q.close) - Number(p.close) || p.y - q.y; });
+  var out = [], id = a.startId;
+  for (var k = 0; k < picked.length && out.length < a.max; k++) {
+    var it = picked[k];
+    // przodek albo potomek już wybrany (div.close > span „X”) — jeden wpis wystarczy
+    var dup = out.some(function (o) { return o._el.contains(it.el) || it.el.contains(o._el); });
+    if (dup) continue;
+    id++;
+    it.el.setAttribute(ATTR, String(id));
+    out.push({ _el: it.el, id: id, role: it.role, name: it.name, href: it.href || undefined, x: it.x, y: it.y, w: it.w, h: it.h, close: it.close });
+  }
+  return out.map(function (o) { var c = Object.assign({}, o); delete c._el; return c; });
 }`;
 
 /** Awaryjna, najprostsza obserwacja (gdy pełna padnie): linki/przyciski po textContent. Wejście: ATTR. */

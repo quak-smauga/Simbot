@@ -63,6 +63,7 @@ flowchart TB
   - **Zasłonięcie**: dla widocznych elementów `elementFromPoint` w środku — jeśli klik dostałoby coś innego, element ma `(zasłonięty przez div.x)` (pole `PageElement.occluded`) i ląduje na liście za niezasłoniętymi. Nakładką może być tylko **warstwa** (`fixed`, `sticky`, `dialog`, `aria-modal`); zwykła treść leżąca na elemencie to nie nakładka. Powierzchnię warstwy mierzy **próbkowanie siatką 12×9 punktów** (`elementFromPoint`), a nie prostokąt kontenera — przezroczysty kontener `fixed` na cały ekran z paskiem reklamy na dole to pasek. Warstwy liczone razem (tło + okienko zgód to jedna nakładka):
     - razem ≥ 40% ekranu albo któraś jest dialogiem → `OVERLAY: … zasłania N% ekranu i M elementów, box=[…]` (zamknij przed kliknięciem),
     - mniej → `STICKY_BANNER: … to pasek na N% ekranu, box=[…]` (nie trzeba zamykać).
+  - **Ramki (iframe)**: elementy z kilku największych widocznych ramek trafiają na listę jak każde inne, z numerami od `1001` i dopiskiem `(w ramce iframe#x)` (pole `PageElement.frame`). Reklamy trzymają „Zamknij X” w ramce, której główny dokument nie widzi — teraz klika się go po numerze. Elementy wyglądające na zamknięcie (`zamknij`, `close`, `×`, ikona z klasą `close`) są na początku listy. Działa też dla ramek z innego originu.
   - **CAPTCHA_SUSPECTED** tylko przy widocznym widżecie (iframe reCAPTCHA / hCaptcha / Turnstile w widoku, ≥ 40×40 px) albo stronie-bramce („nie jestem robotem”, „Just a moment…”). Samo słowo w HTML, ukryty widżet i plakietka reCAPTCHA v3 nie wystarczą.
   - **Błąd kliku**: z logu Playwrighta wyciągany jest powód („`<div …>` intercepts pointer events” → „klik zasłonięty — `<div …>` przechwytuje kliknięcie”), zamiast samego „Timeout”.
 - **Efekt akcji**: po każdej akcji executor porównuje stan przed i po i mówi wprost, co wyszło — decydentowi w logu, w raporcie i w evencie `computer.action` (`outcome`, `url`):
@@ -74,14 +75,19 @@ flowchart TB
   | ten sam adres, inna treść albo widok | `ok — ta sama strona, widok albo treść się zmieniły` |
   | nic się nie zmieniło | `bez zmian (ten sam adres i ta sama treść)` |
   | błąd akcji, a strona w międzyczasie przeszła dalej | `NIE WYKONANO (…) — wcześniejsza akcja zadziałała z opóźnieniem` (nie liczy się jako porażka) |
-  | `click_at` | dopisek `trafiono w: a.close „Zamknij x”` / `iframe#ad — ramka` / `div — NIC KLIKALNEGO w tym punkcie` |
+  | `click_at` | dopisek `trafiono w: a.close „Zamknij x”` / `ramka iframe#ad → div.close „Zamknij X” = [1001] z listy` / `div — NIC KLIKALNEGO w tym punkcie` |
+  | nakładka była i zniknęła | `ok · NAKŁADKA ZNIKNĘŁA — strona jest odsłonięta` (zamknięcie reklamy nie zmienia adresu ani tekstu, więc bez tego brzmiałoby „bez zmian”) |
+  | nakładka była i jest | dopisek `nakładka DALEJ zasłania N% ekranu` |
+  | klik otworzył nową kartę | dopisek `klik otworzył nową kartę: URL „tytuł” — zamknąłem ją` |
 
-- **Czekanie po kliku w link**: jeśli klikany element jest linkiem pod inny adres, `click` czeka do 3 s na zmianę adresu (SPA zmienia go z opóźnieniem), zanim zrobi obserwację.
+- **Czekanie po akcji**: po każdej akcji klikającej co najmniej 250 ms (skutek bywa spóźniony: zamknięcie reklamy idzie wiadomością z ramki). Jeśli klikany element jest linkiem pod inny adres, `click` czeka do 3 s na zmianę adresu (SPA zmienia go z opóźnieniem), zanim zrobi obserwację.
+- **Nowe karty**: executor pracuje na jednej stronie. Karta otwarta przez jego akcję (reklama, `target=_blank`) jest zamykana i zgłaszana w efekcie akcji; decydent może wejść pod ten adres przez `navigate`. Kart otwartych poza akcją executora (user loguje się w okienku OAuth) runtime nie rusza.
+- **Błąd kliku, gdy na wierzchu leży element z listy** (np. przycisk Play na filmie): „na wierzchu leży inny element z listy: [26] … — kliknij [26]”, zamiast „klik zasłonięty (reklama)”.
 - **Pamięć taska**: bieżąca strona ma dopisek `← TU JESTEŚ TERAZ`; strona, na której przeglądarka stała przed zadaniem, to `STRONA STARTOWA` / `START` w raporcie i nie trafia do `ODWIEDZONE`.
 - **Najpierw zrzut**: decydent przed wyborem `[N]` patrzy na zrzut — reklama, modal albo baner nad stroną → najpierw zamknięcie (przycisk z listy albo `click_at` w X, bo reklamy w iframe nie mają `[N]`); treści jeszcze nie widać → `wait`.
 - **Planner** (`planner.ts`): przed pętlą i przy braku postępu (replan), osobny prompt na tryb. Przykład (desktop): „wejdź do nowej karty w Brave”, a karta już jest na ekranie → koniec w kroku 0.
 - **Etapy planu**: `todo` → `doing` → `done`. Etap zalicza się na dwa sposoby:
-  - **executor sam** (tylko przeglądarka), gdy planner dał etapowi warunek `check` — `url_contains`, `url_matches` (regex), `title_contains`, `text_contains`; wszystkie podane pola muszą pasować. Adres porównywany bez protokołu i `www.`, tekst w całym `fullText` bez rozróżniania wielkości liter. Sprawdzany po każdej akcji (nigdy na obserwacji startowej). Event `computer.stage` ma wtedy `auto: true` i `by` (np. `URL xkcd.com/1773/`), a decydent dostaje w logu „✓ etap N … ZALICZONY AUTOMATYCZNIE”,
+  - **executor sam** (tylko przeglądarka), gdy planner dał etapowi warunek `check` — `url_contains`, `url_matches` (regex), `title_contains`, `text_contains`; wszystkie podane pola muszą pasować. Adres porównywany bez protokołu i `www.`, tekst w całym `fullText` bez rozróżniania wielkości liter. Sprawdzany po każdej akcji (nigdy na obserwacji startowej). Warunek, który jest prawdziwy już na obserwacji, na której powstał plan, odpada — taki etap zalicza decydent. Event `computer.stage` ma wtedy `auto: true` i `by` (np. `URL xkcd.com/1773/`), a decydent dostaje w logu „✓ etap N … ZALICZONY AUTOMATYCZNIE”,
   - **decydent** polem `stage_done` (etapy bez `check`).
 
   Zaliczenie etapu nie rusza wcześniejszych: zostają otwarte. Przy zakończeniu `done` etapy, których nikt nie zaliczył, dostają status `unconfirmed` (`?` w raporcie) — to znaczy „nie wiadomo, czy zrobiony”, a nie „niepotrzebny”. Statusu `skipped` executor już nie nadaje (zostaje w starych zapisach rozmów).

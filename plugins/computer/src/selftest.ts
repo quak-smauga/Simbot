@@ -262,7 +262,12 @@ await test("błąd kliku: „intercepts pointer events” z logu Playwrighta →
   const { explainActionError } = await import("./browser.js");
   const pw = new Error(`locator.click: Timeout 6000ms exceeded.\nCall log:\n  - waiting for locator('[data-qwe-id="64"]').first()\n  -   locator resolved to <a href="/art/1">Polska</a>\n  - attempting click action\n  -   element is visible, enabled and stable\n  -   <div class="sd-cmp-MtHO2">…</div> from <div id="sd-cmp">…</div> subtree intercepts pointer events\n  - retrying click action`);
   assert.equal(explainActionError(pw).message.split("\n").length, 1);
-  assert.match(explainActionError(pw).message, /^klik zasłonięty — <div class="sd-cmp-MtHO2"> przechwytuje kliknięcie/);
+  assert.match(explainActionError(pw).message, /^klik zasłonięty — <div\.sd-cmp-MtHO2> przechwytuje kliknięcie/);
+  // joemonster 24.11: klik w film przechwycił przycisk Play, który SAM był na liście jako [26] — to nie reklama
+  const play = new Error(`locator.click: Timeout 6000ms exceeded.\nCall log:\n  - - <div tabindex="0" role="button" data-qwe-id="26" aria-label="Play" aria-pressed="false" class="mejs__overlay mejs__layer mejs__overlay-play">…</div> intercepts pointer events`);
+  assert.equal(explainActionError(play).message, "w tym miejscu na wierzchu leży inny element z listy: [26] <div.mejs__overlay „Play”> — kliknij [26] zamiast tego");
+  const frame = new Error(`locator.click: Timeout\n  - - <iframe width="1280" height="800" scrolling="no" data-integralas-id-fd24="" src="x"></iframe> intercepts pointer events`);
+  assert.match(explainActionError(frame).message, /^klik zasłonięty — <iframe> przechwytuje kliknięcie/);
   assert.equal(explainActionError(new Error("locator.click: Timeout 6000ms exceeded.")).message, "locator.click: Timeout 6000ms exceeded.");
 });
 
@@ -374,6 +379,44 @@ await test("desktop: warunków etapów executor nie zalicza sam (zakres fazy 1 t
   const plan = normalizePlan({ estimated_steps: 2, stages: [{ title: "Okno", done_when: "x", check: { url_contains: "leafly" } }] });
   await runComputerTask({ goal: "x", context: "", maxSteps: 20, browser: { ...startedBrowser("app://finder"), openApp: async () => {} }, decider: scripted((i) => (i.step === 1 ? { action: "navigate", url: "https://www.leafly.com/" } : { action: "done", result: "x" })), planner: fixedPlanner([plan]), mode: "desktop", call, log: () => {} });
   assert.deepEqual(events.filter((e) => e.type === "computer.stage").map((e) => e.data.status), ["unconfirmed"]);
+});
+
+// ───────── poprawki po powtórce testów 24.11 (joemonster: film „Spider-Man z Temu”) ─────────
+
+await test("zamknięcie reklamy (nakładka znika, adres i tekst te same) → „NAKŁADKA ZNIKNĘŁA”, nie „bez zmian”; gdy zostaje → „DALEJ zasłania”", async () => {
+  const { call } = fakeCall();
+  const seen: DeciderInput[] = [];
+  let overlay = true, seq = 0;
+  const b: BrowserLike = {
+    async observe(): Promise<Observation> {
+      return { url: "https://joemonster.org/filmy/1", title: "Film", text: "# Film", hints: overlay ? ["OVERLAY: div#ad (iframe — reklama?) zasłania 100% ekranu i 30 elementów, box=[0,0,1,1] — zamknij ją"] : [], elements: [{ id: 1, role: "link", name: "Film", inViewport: true, ...(overlay ? { occluded: "div#ad" } : {}) }], screenshot: Buffer.alloc(0), observationId: `obs_${++seq}`, at: Date.now() };
+    },
+    async clickAt(x: number) { if (x > 0.9) overlay = false; return { hit: "ramka iframe#ad → div.close „Zamknij X” = [1001] z listy" }; },
+    async navigate() {}, async click() {}, async hover() {}, async type() {}, async press() {}, async scroll() {}, async wait() {}, async back() {},
+  };
+  await run(b, scripted((i) => (i.step === 1 ? { action: "click_at", x: 0.5, y: 0.5 } : i.step === 2 ? { action: "click_at", x: 0.92, y: 0.04 } : { action: "done", result: "x" }), seen), call);
+  assert.match(seen[1].log.join("\n"), /1\. click_at \(0\.50, 0\.50\) → bez zmian[^\n]*trafiono w: ramka iframe#ad[^\n]*nakładka DALEJ zasłania 100% ekranu/);
+  assert.match(seen[2].log.join("\n"), /2\. click_at \(0\.92, 0\.04\) → ok · trafiono w: ramka iframe#ad → div\.close „Zamknij X” = \[1001\] z listy · NAKŁADKA ZNIKNĘŁA — strona jest odsłonięta/);
+});
+
+await test("warunek etapu prawdziwy już w chwili planowania (replan na tej samej stronie) nie zalicza etapu po byle akcji — zostaje dla decydenta", async () => {
+  const { call, events } = fakeCall();
+  const seen: DeciderInput[] = [];
+  const plan = normalizePlan({ estimated_steps: 2, stages: [{ title: "Tytuł i treść filmu odczytane", done_when: "widać opis", check: { url_contains: "joemonster.org/filmy/140789", text_contains: "gelato" } }] });
+  const r = await runComputerTask({ goal: "opisz film", context: "", maxSteps: 20, browser: startedBrowser("https://joemonster.org/filmy/140789/x"), decider: scripted((i) => (i.step === 1 ? { action: "scroll", direction: "down" } : { action: "done", result: "x" }), seen), planner: fixedPlanner([plan]), mode: "browser", call, log: () => {} });
+  assert.equal((events.find((e) => e.type === "computer.plan")?.data.stages as { check?: unknown }[])[0].check, undefined, "warunek odpada już w planie");
+  assert.ok(!/\[executor sprawdza sam\]/.test(seen[0].plan ?? ""));
+  assert.deepEqual(events.filter((e) => e.type === "computer.stage").map((e) => e.data.status), ["unconfirmed"]);
+  assert.match(r.text, /\? 1\. Tytuł i treść filmu odczytane/);
+});
+
+await test("klik otworzył nową kartę (reklama) → efekt akcji mówi o tym i o zamknięciu karty", async () => {
+  const { call } = fakeCall();
+  const seen: DeciderInput[] = [];
+  let pending: string[] = [];
+  const b = { ...startedBrowser("https://joemonster.org/", { click: () => { pending = ["https://olx.pl/promo „OLX”"]; } }), takePopups: async () => pending.splice(0) };
+  await run(b, scripted((i) => (i.step === 1 ? { action: "click", target: 65 } : { action: "done", result: "x" }), seen), call);
+  assert.match(seen[1].log.join("\n"), /1\. click \[65\][^\n]*→ bez zmian[^\n]*klik otworzył nową kartę: https:\/\/olx\.pl\/promo „OLX” — zamknąłem ją/);
 });
 
 function trSteps(t: string) { return Number(/KROKI: (\d+)/.exec(t)?.[1] ?? 99); }

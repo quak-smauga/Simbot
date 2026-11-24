@@ -30,19 +30,25 @@ const PAGES: Record<string, string> = {
   "/captcha-true": page("Z captchą", `<h1>Sprawdzamy</h1><iframe title="reCAPTCHA" srcdoc="<p>Nie jestem robotem</p>" style="width:304px;height:78px"></iframe>`),
   // SPA: klik w link zmienia adres dopiero po 900 ms (jak leafly.com → /strains)
   "/spa": page("SPA start", `<h1 id="h">Start</h1><p><a href="/spa/next" id="go">see all strains</a></p><script>document.getElementById("go").addEventListener("click", function (e) { e.preventDefault(); setTimeout(function () { history.pushState({}, "", "/spa/next"); document.title = "SPA dalej"; document.getElementById("h").textContent = "Dalej"; }, 900); });</script>`),
+  // reklama w ramce z INNEGO originu (jak OLX / Hyundai na joemonster.org): „Zamknij X” istnieje tylko wewnątrz iframe
+  "/framead": page("Reklama w ramce", `${links(12)}<div id="ad" style="position:fixed;inset:0;z-index:9"><iframe id="adf" src="{{ALT}}/adframe" style="width:100%;height:100%;border:0"></iframe></div><script>window.addEventListener("message", function (e) { if (e.data === "close") document.getElementById("ad").remove(); });</script>`),
+  "/adframe": page("Ad", `<div class="ad-close" style="position:absolute;top:10px;right:20px;cursor:pointer" onclick="parent.postMessage('close','*')">Zamknij X</div><h1 style="margin:200px 40px 0">Nowy Hyundai</h1><p style="margin:0 40px"><a href="{{BASE}}/divs" target="_blank">Zobacz ofertę</a></p>`, "body{background:#cff}"),
   // przycisk z samą ikoną + pusty obszar do click_at
   "/icon": page("Ikona", `<h1>Strona z ikoną</h1><button class="close-btn" style="position:fixed;top:8px;right:8px;width:32px;height:32px"><svg width="16" height="16"><path d="M0 0L16 16"/></svg></button><div class="wrap" style="height:600px"></div>`),
   // strona z samych div/span
   "/divs": page("Same divy", `<div><span>Pierwsza linia treści w divie.</span></div><div><span>Druga linia treści w divie.</span></div>`),
 };
 
+let base = "", alt = "";
 const server = createServer((req, res) => {
   const body = PAGES[(req.url ?? "/").split("?")[0]] ?? PAGES["/long"];
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-  res.end(body);
+  res.end(body.replaceAll("{{BASE}}", base).replaceAll("{{ALT}}", alt));
 });
-await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+await new Promise<void>((r) => server.listen(0, r));
+base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+// ten sam serwer pod inną nazwą hosta = inny origin (ramka reklamy jest cross-origin, jak w prawdziwym świecie)
+alt = `http://localhost:${(server.address() as AddressInfo).port}`;
 const dataDir = mkdtempSync(join(tmpdir(), "qwe-browsertest-"));
 const browser = new BrowserRuntime({ dataDir, headless: true, log: () => {} });
 
@@ -146,6 +152,45 @@ try {
     assert.equal(icon?.name, "(ikona: close — góra, prawo)");
     assert.match((await browser.clickAt(0.5, 0.6)).hit ?? "", /^div\.wrap — NIC KLIKALNEGO w tym punkcie$/);
     assert.equal((await browser.clickAt(0.985, 0.03)).hit, `button.close-btn = [${icon.id}] z listy`);
+  });
+
+  await test("reklama w ramce z innego originu: „Zamknij X” jest na liście jako [1001] (w ramce …); click_at mówi, w co trafił WEWNĄTRZ ramki; klik po numerze zamyka", async () => {
+    await browser.navigate(`${base}/framead`);
+    let o = await browser.observe();
+    assert.ok(pct(hint(o.hints, "OVERLAY")) >= 90, o.hints.join(" | "));
+    const x = o.elements.find((e) => e.name === "Zamknij X");
+    assert.ok(x && x.frame === "iframe#adf" && x.id > 1000, JSON.stringify(o.elements.filter((e) => e.frame)));
+    assert.equal(o.elements[0].id, x.id, "przycisk zamknięcia z ramki jest na początku listy");
+    assert.match(describeObservation(o), /\[100\d\] button "Zamknij X" box=\[[\d.,]+\] \(w ramce iframe#adf — klikaj normalnie po numerze\)/);
+    assert.match((await browser.clickAt(0.5, 0.9)).hit ?? "", /^ramka iframe#adf → (body|html)\S* — NIC KLIKALNEGO w tym punkcie$/);
+    const [bx, by, bw, bh] = x.box!;
+    o = await browser.observe();
+    const x2 = o.elements.find((e) => e.name === "Zamknij X")!;
+    // punkt trafienia w sam przycisk: executor dostaje nazwę i numer z listy (klik zamyka reklamę)
+    assert.match((await browser.clickAt(bx + bw / 2, by + bh / 2)).hit ?? "", new RegExp(`^ramka iframe#adf → div\\.ad-close „Zamknij X” = \\[${x2.id}\\] z listy$`));
+    o = await browser.observe();
+    assert.ok(!hint(o.hints, "OVERLAY") && !o.elements.some((e) => e.frame), o.hints.join(" | "));
+    // i to samo po numerze, bez celowania
+    await browser.navigate(`${base}/framead`);
+    o = await browser.observe();
+    const again = o.elements.find((e) => e.name === "Zamknij X")!;
+    await browser.click(again.id);
+    o = await browser.observe();
+    assert.ok(!hint(o.hints, "OVERLAY"), `[${again.id}] ${again.frame} ${JSON.stringify(again.box)} → ${o.hints.join(" | ")} · ramki: ${o.elements.filter((e) => e.frame).map((e) => `${e.id}:${e.name}`).join(",")}`);
+  });
+
+  await test("klik w reklamę otwiera nową kartę → karta zamknięta i zgłoszona (takePopups), przeglądarka zostaje na stronie", async () => {
+    await browser.navigate(`${base}/framead`);
+    const o = await browser.observe();
+    const offer = o.elements.find((e) => e.name === "Zobacz ofertę");
+    assert.ok(offer?.frame, JSON.stringify(o.elements.filter((e) => e.frame)));
+    assert.deepEqual(await browser.takePopups(), []);
+    await browser.click(offer.id);
+    const popups = await browser.takePopups();
+    assert.equal(popups.length, 1);
+    assert.match(popups[0], new RegExp(`^${base}/divs „Same divy”$`));
+    assert.equal((await browser.observe()).url, `${base}/framead`);
+    assert.deepEqual(await browser.takePopups(), [], "zgłoszone raz");
   });
 
   await test("strona z samych div/span → tekst z węzłów tekstowych w widoku (kiedyś pusty)", async () => {

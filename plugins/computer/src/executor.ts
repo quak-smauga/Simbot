@@ -29,6 +29,8 @@ export type ComputerStatus = "ok" | "partial" | "cancelled_by_user" | "failed";
 export type BrowserLike = Pick<BrowserRuntime, "observe" | "navigate" | "click" | "hover" | "type" | "press" | "scroll" | "wait" | "back"> & {
   /** przeglądarka zwraca `hit` — co leżało w klikanym punkcie; desktop i atrapy mogą nie zwracać nic */
   clickAt(x: number, y: number): Promise<{ hit?: string } | void>;
+  /** nowe karty otwarte przez ostatnią akcję (przeglądarka już je zamknęła) — idą do efektu akcji */
+  takePopups?(): Promise<string[]>;
   /** desktop: uruchom / przełącz aplikację */
   openApp?(name: string): Promise<void>;
 };
@@ -95,8 +97,10 @@ const describeDecision = (d: Decision) => {
 
 /** URL bez #fragmentu i końcowego „/” — do liczenia powrotów na tę samą stronę. */
 const pageKey = (url: string) => url.replace(/#.*$/, "").replace(/\/$/, "");
-/** Czy akcja coś zmieniła? Porównujemy to, co widać: adres, tytuł, początek tekstu, liczbę elementów. */
-const signature = (o: Observation) => `${pageKey(o.url)}|${o.title}|${o.elements.length}|${o.text.slice(0, 400)}`;
+const overlayOf = (o: Observation) => o.hints.find((h) => h.startsWith("OVERLAY:"));
+const overlayPct = (h: string | undefined) => /(\d+)% ekranu/.exec(h ?? "")?.[1] ?? "?";
+/** Czy akcja coś zmieniła? To, co widać: adres, tytuł, początek tekstu, liczba elementów — i czy stronę zasłania nakładka (ile elementów). */
+const signature = (o: Observation) => `${pageKey(o.url)}|${o.title}|${o.elements.length}|${overlayOf(o) ? "overlay" : ""}|${o.elements.filter((e) => e.occluded).length}|${o.text.slice(0, 400)}`;
 /**
  * Intencja akcji niezależna od numeru elementu: navigate i klik w link pod ten sam adres to to samo („go c.xkcd.com/random/comic”),
  * klik w przycisk = rola + nazwa. Inne akcje (scroll, wait, type…) nie są liczone — tym zajmuje się wykrywanie pętli.
@@ -124,19 +128,24 @@ const flatUrl = (u: string) => bareUrl(/^[a-z]+:\/\//i.test(u) ? u : `https://${
  * Co akcja DAŁA — z faktów, które executor ma (adres przed/po, zmiana treści, błąd, punkt trafienia). Idzie do logu decydenta,
  * do raportu i do UI. Bez tego decydent widział „navigate /random → ok” i stronę /1773, i uznawał, że losowanie nie zadziałało.
  */
-function describeOutcome(x: { d: Decision; prev: Observation; obs: Observation; changed: boolean; actionError: string | null; hit?: string }): string {
-  const { d, prev, obs, changed, actionError, hit } = x;
+function describeOutcome(x: { d: Decision; prev: Observation; obs: Observation; changed: boolean; actionError: string | null; hit?: string; popups?: string[] }): string {
+  const { d, prev, obs, changed, actionError, hit, popups } = x;
   const moved = pageKey(obs.url) !== pageKey(prev.url);
   const here = `${obs.url}${obs.title ? ` „${obs.title.slice(0, 60)}”` : ""}`;
   if (actionError) return moved ? `NIE WYKONANO (${actionError}) — bo strona w międzyczasie przeszła na ${here}: wcześniejsza akcja zadziałała z opóźnieniem. To nie błąd strony; pracuj na nowej obserwacji.` : `BŁĄD: ${actionError}`;
-  const tail = hit ? ` · trafiono w: ${hit}` : "";
+  // nakładka: zamknięcie reklamy nie zmienia adresu ani tekstu strony — bez tego decydent słyszał „bez zmian” po udanym kliknięciu w X
+  const was = overlayOf(prev), is = overlayOf(obs);
+  const overlay = was && !is ? " · NAKŁADKA ZNIKNĘŁA — strona jest odsłonięta, nie zamykaj jej drugi raz" : was && is ? ` · nakładka DALEJ zasłania ${overlayPct(is)}% ekranu` : !was && is ? ` · pojawiła się nakładka (${overlayPct(is)}% ekranu)` : "";
+  const popup = popups?.length ? ` · klik otworzył nową kartę: ${popups[0]} — zamknąłem ją (zwykle reklama; jeśli to był cel, wejdź tam przez navigate)` : "";
+  const tail = `${hit ? ` · trafiono w: ${hit}` : ""}${overlay}${popup}`;
   if (d.action === "navigate") {
     if (/^chrome-error:/i.test(obs.url)) return "BŁĄD: strona się nie załadowała (błąd sieci albo zły adres)";
-    if (flatUrl(d.url) === flatUrl(obs.url)) return `ok — otwarto ${here}`;
+    if (flatUrl(d.url) === flatUrl(obs.url)) return `ok — otwarto ${here}${overlay}`;
     if (!moved && !changed) return `nie zadziałało — adres się nie otworzył, dalej jesteś na ${here}`;
-    return `ok — PRZEKIEROWANO na ${here}. To JEST wynik tej akcji (adres ${bareUrl(d.url)} sam przenosi dalej) — nie powtarzaj jej.`;
+    return `ok — PRZEKIEROWANO na ${here}. To JEST wynik tej akcji (adres ${bareUrl(d.url)} sam przenosi dalej) — nie powtarzaj jej.${overlay}`;
   }
   if (moved) return `ok — nowa strona: ${here}${tail}`;
+  if (was && !is) return `ok${tail}`;
   if (changed) return `ok — ta sama strona, widok albo treść się zmieniły${tail}`;
   return `bez zmian (ten sam adres i ta sama treść)${tail}`;
 }
@@ -324,7 +333,12 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
   let budget = o.maxSteps;
   let replans = 0;
   const applyPlan = (p: TaskPlan, step: number, replan: boolean) => {
-    trace.stages = p.stages.map((s, i) => ({ ...s, status: i === 0 ? "doing" : "todo" }));
+    trace.stages = p.stages.map((s, i) => {
+      // warunek spełniony już na obserwacji, na której powstał plan, niczego nie sprawdza („tytuł zawiera »serenad«” na stronie,
+      // na której już jesteśmy) — zaliczyłby etap po pierwszej dowolnej akcji. Taki etap zostaje bez warunku: zalicza go decydent.
+      const check = s.check && mode === "browser" && !checkStage(s.check, obs) ? s.check : undefined;
+      return { ...s, check, status: i === 0 ? "doing" : "todo" };
+    });
     budget = Math.min(o.maxSteps, step + budgetFor(p.estimatedSteps, o.maxSteps));
     trace.budget = budget;
     emit("computer.plan", { replan, alreadyDone: p.alreadyDone, why: p.why, estimatedSteps: p.estimatedSteps, budget, cap: o.maxSteps, stages: trace.stages.map((s) => ({ id: s.id, title: s.title, doneWhen: s.doneWhen, check: s.check, status: s.status })) });
@@ -498,10 +512,11 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
         emit("computer.action", { step, action: d.action, label: key, status: actionError ? "failed" : "completed", error: actionError ?? undefined });
         break;
       }
+      const popups = (await browser.takePopups?.().catch(() => [] as string[])) ?? [];
       const visitsBefore = trace.visits.length;
       obs = await observe(); // VERIFY: nowa obserwacja, decyzja w następnej iteracji
       const changed = signature(obs) !== before;
-      const outcome = describeOutcome({ d, prev, obs, changed, actionError, hit });
+      const outcome = describeOutcome({ d, prev, obs, changed, actionError, hit, popups });
       // „brak elementu”, bo strona zdążyła przejść dalej po wcześniejszym kliknięciu = spóźniona nawigacja, nie porażka
       const late = !!actionError && pageKey(obs.url) !== pageKey(prev.url);
       if (actionError && !late) trace.failures.push(`${label}: ${actionError}`);

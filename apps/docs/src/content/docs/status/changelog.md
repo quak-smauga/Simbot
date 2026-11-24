@@ -7,6 +7,18 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-24 — computer: ramki, nowe karty i poprawki po powtórce testów
+
+Powtórka trzech zadań po fazie 1: xkcd w 2 krokach, leafly bez fałszywego błędu, joemonster dalej z kłopotem. Z eventów i zrzutów: klik `click_at` trafił w „Zamknij X” i zamknął reklamę, a efekt akcji brzmiał „bez zmian”.
+
+- **Ramki**: elementy z widocznych iframe'ów są na liście jako `[1001…]` (`PageElement.frame`); `click`, `type` i `hover` działają na nich po numerze, także między originami. `click_at` mówi, w co trafił wewnątrz ramki.
+- **Nowe karty**: karta otwarta przez akcję executora jest zamykana i zgłaszana w efekcie akcji (`BrowserRuntime.takePopups`).
+- **Efekt akcji** widzi nakładkę: „NAKŁADKA ZNIKNĘŁA” / „nakładka DALEJ zasłania N%”. Co najmniej 250 ms oddechu po akcji klikającej, bo skutek bywa spóźniony.
+- Warunek etapu prawdziwy już w chwili planowania odpada (replan dał `text_contains: "serenad"` na stronie, na której to słowo już było, i etap „treść odczytana” zaliczył się sam).
+- Błąd kliku rozróżnia reklamę od elementu z listy leżącego na wierzchu („kliknij [26]”).
+- Czat: „N kroków” w podsumowaniu zadania liczy akcje, nie wpisy przebiegu.
+- Strony docsów: [Computer](/capabilities/computer/), [Testy](/development/testing/).
+
 ## 2026-11-24 — computer: decydent dostaje prawdziwe informacje (faza 1)
 
 Tło i dowody: `design/computer-flow.md` + `design/computer-flow-review.md` (trzy zadania testowe: joemonster, xkcd, leafly).

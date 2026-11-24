@@ -176,7 +176,7 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
   /** Kroki karty jako linie: { label, bad, skipped, ms | at+end }. computer.run rozpisany na akcje z logu. */
   function linesOf(card) {
     const toolLines = (t, label) => {
-      if (t && t.name === 'computer.run' && t.log.length) return t.log.map((a, i) => ({ label: a.err || a.label, bad: !!a.err || a.status === 'failed', at: a.at, end: t.log[i + 1] && t.log[i + 1].at }));
+      if (t && t.name === 'computer.run' && t.log.length) return t.log.map((a, i) => ({ label: a.err || a.label, bad: !!a.err || a.status === 'failed', at: a.at, end: t.log[i + 1] && t.log[i + 1].at, act: !!a.step }));
       if (t && t.name === 'web.query') return [{ label: t.results ? `${t.query} · ${t.results.length} wyn.` : `szukam: ${t.query || argOf(t.args)}`, ms: t.ms, at: t.at }];
       return [{ label, ms: t && t.ms, at: t && t.at, bad: !!t && t.ok === false }];
     };
@@ -212,7 +212,8 @@ export function createCards({ container, onControl, onFocus, shotUrl, avatarFor 
     }
     const L = linesOf(card);
     if (ended) {
-      const n = L.length;
+      // „N kroków” = akcje wykonawcy; notatki, etapy i plan to wpisy w przebiegu, nie kroki
+      const n = L.filter(l => l.act !== false).length;
       const txt = card.state === 'succeeded' ? `${kindOf(card)}${n > 1 ? ` · ${n} ${plural(n)}` : ''}` : card.state === 'failed' ? `${kindOf(card)} · ${card.error || (t && t.result) || 'błąd'}` : `${kindOf(card)} · anulowane`;
       return row(`tst--end tst--${card.state}`, card.state === 'succeeded' ? '✓' : card.state === 'failed' ? '✗' : '–', txt, card.ms != null ? ms(card.ms) : '', thumb + chev);
     }
