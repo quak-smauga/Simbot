@@ -221,6 +221,57 @@ await test("planner: osobne prompty — przeglądarka nie dostaje aplikacji ani 
   assert.match(systems[1], /trybie DESKTOP/);
   assert.match(systems[1], /SELF_FRONTMOST/);
 });
+/** xkcd: /random przekierowuje na losowy komiks — każde wejście i każdy klik „Random” daje NOWĄ stronę. */
+function randomComicBrowser() {
+  let url = "about:blank";
+  let n = 100;
+  let seq = 0;
+  const go = () => { url = `https://xkcd.com/${n++}/`; };
+  const b: BrowserLike = {
+    async observe(): Promise<Observation> {
+      const blank = url === "about:blank";
+      return { url, title: blank ? "" : `xkcd: Komiks ${url}`, text: blank ? "" : `Archive\n# Komiks ${url}\n< Prev\nRandom`, hints: [], elements: blank ? [] : [{ id: 18, role: "link", name: "Random", href: "https://c.xkcd.com/random/comic/", inViewport: true }], screenshot: Buffer.alloc(0), observationId: `obs_${++seq}`, at: Date.now() };
+    },
+    async navigate(u: string) { if (/random/.test(u)) go(); else url = u; },
+    async click() { go(); },
+    async clickAt() {}, async hover() {}, async type() {}, async press() {}, async scroll() {}, async wait() {}, async back() {},
+  };
+  return b;
+}
+
+await test("xkcd: navigate /random i klik „Random” na zmianę (strona zmienia się za każdym razem) → POWTARZASZ, nie 19 kroków", async () => {
+  const { call, events } = fakeCall();
+  const seen: DeciderInput[] = [];
+  const r = await run(randomComicBrowser(), scripted((i) => (i.step % 2 ? { action: "navigate", url: "https://c.xkcd.com/random/comic/", note: `komiks ${i.observation.url}` } : { action: "click", target: 18, note: `komiks ${i.observation.url}` }), seen), call, 25);
+  const rep = events.filter((e) => e.type === "computer.loop" && /powtórzone \d+×/.test(String(e.data.description)));
+  assert.ok(rep.length >= 1, "wykryte powtarzanie mimo zmian strony");
+  assert.ok(seen.some((i) => i.log.some((l) => /POWTARZASZ: .*ta akcja DZIAŁA/.test(l))), "decydent dostaje informację, że akcja działa");
+  assert.equal(r.status, "partial");
+  assert.ok(trSteps(r.text) <= 10, `kończy się szybko, a nie na limicie (${trSteps(r.text)} kroków)`);
+});
+
+await test("xkcd: decydent słucha podpowiedzi POWTARZASZ → done na obecnym komiksie", async () => {
+  const { call } = fakeCall();
+  const r = await run(randomComicBrowser(), scripted((i) => (i.log.some((l) => l.includes("POWTARZASZ")) ? { action: "done", result: `Komiks: ${i.observation.title}` } : i.step % 2 ? { action: "navigate", url: "c.xkcd.com/random/comic" } : { action: "click", target: 18 })), call, 25);
+  assert.equal(r.status, "ok");
+  assert.match(r.text, /WYNIK: Komiks: xkcd: Komiks https:\/\/xkcd\.com\/102\//);
+});
+
+await test("błąd kliku: „intercepts pointer events” z logu Playwrighta → „klik zasłonięty — <div …>”, a nie sam Timeout", async () => {
+  const { explainActionError } = await import("./browser.js");
+  const pw = new Error(`locator.click: Timeout 6000ms exceeded.\nCall log:\n  - waiting for locator('[data-qwe-id="64"]').first()\n  -   locator resolved to <a href="/art/1">Polska</a>\n  - attempting click action\n  -   element is visible, enabled and stable\n  -   <div class="sd-cmp-MtHO2">…</div> from <div id="sd-cmp">…</div> subtree intercepts pointer events\n  - retrying click action`);
+  assert.equal(explainActionError(pw).message.split("\n").length, 1);
+  assert.match(explainActionError(pw).message, /^klik zasłonięty — <div class="sd-cmp-MtHO2"> przechwytuje kliknięcie/);
+  assert.equal(explainActionError(new Error("locator.click: Timeout 6000ms exceeded.")).message, "locator.click: Timeout 6000ms exceeded.");
+});
+
+await test("obserwacja: zasłonięty element i OVERLAY trafiają do opisu dla decydenta", async () => {
+  const { describeObservation } = await import("./browser.js");
+  const d = describeObservation({ url: "https://joemonster.org/", title: "JM", text: "", hints: ["OVERLAY: div.sd-cmp zasłania 100% ekranu i 36 elementów, box=[0,0,1,1]"], elements: [{ id: 262, role: "button", name: "Zaakceptuj wszystkie", inViewport: true }, { id: 1, role: "link", name: "Główna", inViewport: true, occluded: "div.sd-cmp" }], screenshot: Buffer.alloc(0), observationId: "o", at: 0 });
+  assert.match(d, /HINTY: OVERLAY: div\.sd-cmp/);
+  assert.match(d, /\[262\] button "Zaakceptuj wszystkie"\n\[1\] link "Główna" \(zasłonięty przez div\.sd-cmp\)/);
+});
+
 function trSteps(t: string) { return Number(/KROKI: (\d+)/.exec(t)?.[1] ?? 99); }
 
 console.log(`computer: ${passed} testów OK`);

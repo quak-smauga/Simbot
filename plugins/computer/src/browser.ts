@@ -28,6 +28,10 @@ export interface PageElement {
   name: string;
   href?: string;
   value?: string;
+  /** Atrybut title (dymek po najechaniu) — dla obrazków osobno od alt; xkcd trzyma tam żart („alt text”). */
+  tooltip?: string;
+  /** Co przechwyci klik w środek elementu (nakładka nad stroną) — opis jak „div.sd-cmp” albo „iframe#ad”. */
+  occluded?: string;
   inViewport: boolean;
   /** Ramka w ułamkach viewportu [x, y, w, h] — tylko dla canvas/img/video (cele dla click_at). */
   box?: number[];
@@ -43,6 +47,23 @@ export interface BrowserOptions {
 }
 
 const ATTR = "data-qwe-id";
+
+/**
+ * Błąd kliku Playwrighta ma sedno w dalszych liniach logu („<div …> intercepts pointer events”), a pierwsza to tylko „Timeout”.
+ * Wyciągamy powód, żeby decydent wiedział, że trzeba zamknąć nakładkę, a nie klikać to samo jeszcze raz.
+ */
+export function explainActionError(e: unknown): Error {
+  const msg = (e as Error)?.message ?? String(e);
+  const lines = msg.split("\n").map((l) => l.trim());
+  const icpt = lines.reverse().find((l) => /intercepts pointer events/.test(l));
+  if (icpt) {
+    const who = icpt.replace(/^-\s*/, "").replace(/\s*(from .*)?(subtree )?intercepts pointer events.*$/, "").replace(/>[^<]*<\/[a-z0-9]+>$/i, ">").slice(0, 120);
+    return new Error(`klik zasłonięty — ${who} przechwytuje kliknięcie (nakładka: reklama/baner/modal). Zamknij ją (przycisk z listy albo click_at w X na zrzucie), nie klikaj tego samego.`);
+  }
+  if (lines.some((l) => /element is not visible/.test(l))) return new Error("element niewidoczny — przewiń do niego albo wybierz inny");
+  if (lines.some((l) => /outside of the viewport/.test(l))) return new Error("element poza ekranem — przewiń (scroll) albo wybierz inny");
+  return e instanceof Error ? e : new Error(msg);
+}
 
 export class BrowserRuntime {
   private ctx: BrowserContext | null = null;
@@ -119,7 +140,7 @@ export class BrowserRuntime {
     const loc = page.locator(`[${ATTR}="${target}"]`).first();
     if (!(await loc.count())) throw new Error(`brak elementu [${target}] — zrób observe`);
     await loc.scrollIntoViewIfNeeded().catch(() => {});
-    await loc.click({ timeout: 6000 });
+    await loc.click({ timeout: 6000 }).catch((e) => { throw explainActionError(e); });
     await this.settle();
   }
   async type(target: number | undefined, text: string, submit = false) {
@@ -148,7 +169,7 @@ export class BrowserRuntime {
     if (target !== undefined) {
       const loc = page.locator(`[${ATTR}="${target}"]`).first();
       if (!(await loc.count())) throw new Error(`brak elementu [${target}] — zrób observe`);
-      await loc.hover({ timeout: 6000 });
+      await loc.hover({ timeout: 6000 }).catch((e) => { throw explainActionError(e); });
     } else {
       const { px, py } = this.toPx(page, x ?? 0.5, y ?? 0.5);
       await page.mouse.move(px, py, { steps: 8 });
@@ -208,6 +229,6 @@ export class BrowserRuntime {
 
 /** Tekstowa postać obserwacji dla modelu (bez screenshotu). */
 export function describeObservation(o: Observation, maxEl = 70): string {
-  const els = o.elements.slice(0, maxEl).map((e) => `[${e.id}] ${e.role} "${e.name}"${e.href ? ` → ${e.href}` : ""}${e.value ? ` (wpisane: "${e.value}")` : ""}${e.box ? ` box=[${e.box.join(",")}]` : ""}${e.inViewport ? "" : " (poza ekranem)"}`);
+  const els = o.elements.slice(0, maxEl).map((e) => `[${e.id}] ${e.role} "${e.name}"${e.href ? ` → ${e.href}` : ""}${e.value ? ` (wpisane: "${e.value}")` : ""}${e.tooltip ? ` dymek(title): "${e.tooltip}"` : ""}${e.box ? ` box=[${e.box.join(",")}]` : ""}${e.occluded ? ` (zasłonięty przez ${e.occluded})` : ""}${e.inViewport ? "" : " (poza ekranem)"}`);
   return [`URL: ${o.url}`, `TYTUŁ: ${o.title || "(brak)"}`, o.hints.length ? `HINTY: ${o.hints.join(", ")}` : "", `ELEMENTY (${o.elements.length}):`, els.join("\n") || "(brak)", `TEKST:`, o.text || "(brak)"].filter(Boolean).join("\n");
 }

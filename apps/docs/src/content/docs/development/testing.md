@@ -20,7 +20,7 @@ pnpm test        # wszystkie pakiety z "test"
 | Pakiet | Co sprawdza (bez API) |
 |---|---|
 | `@qwe/core` (`src/selftest.ts`) | parser strumienia i bloków `<nativeapi>`, executor planu (równoległość, `after`, skip, cykle), `extractJson`, command router, mentions, slug usera |
-| `@qwe/plugin-computer` (`src/selftest.ts`) | executor na atrapie przeglądarki i skryptowanym decydencie: raport przy anulowaniu (z wynikiem zebranym po drodze), wykrywanie pętli i okrążeń X → Y → Z → X, przekazanie kontroli userowi (czekanie ≠ anulowanie) |
+| `@qwe/plugin-computer` (`src/selftest.ts`) | executor na atrapie przeglądarki i skryptowanym decydencie: raport przy anulowaniu (z wynikiem zebranym po drodze), wykrywanie pętli i okrążeń X → Y → Z → X, powtarzanie tej samej intencji mimo zmian strony (xkcd /random), błąd kliku zasłoniętego nakładką i opis zasłonięcia w obserwacji, przekazanie kontroli userowi (czekanie ≠ anulowanie) |
 | `@qwe/mcp` (`src/selftest.ts`) | prawdziwy serwer testowy `kwak-mcp.mjs` po stdio i po HTTP: handshake, katalog na dysku, sekcja promptu, wywołania przez tagi, argumenty (JSON / atrybuty / sama treść), błąd narzędzia, nieznane narzędzie, zasoby, prompty, dostęp per sim, potwierdzenia, stan między wywołaniami |
 
 ```bash

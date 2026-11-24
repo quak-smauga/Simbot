@@ -50,6 +50,8 @@ const MAX_NOTES = 40;
 /** Tyle kroków bez postępu (etap zrobiony / nowa notatka / nowe miejsce) = replan; po MAX_REPLANS — koniec jako partial. */
 const NO_PROGRESS = 6;
 const MAX_REPLANS = 2;
+/** Ta sama intencja (np. „idź na /random”) tyle razy od ostatniego zrobionego etapu = powtarzanie, nawet jeśli strona się zmienia. */
+const REPEAT_LIMIT = 3;
 
 /** Notatki „prawie takie same” (model przepisuje ten sam fakt innymi słowami) nie są nową wiedzą. */
 const words = (t: string) => new Set(t.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length > 2));
@@ -90,6 +92,20 @@ const describeDecision = (d: Decision) => {
 const pageKey = (url: string) => url.replace(/#.*$/, "").replace(/\/$/, "");
 /** Czy akcja coś zmieniła? Porównujemy to, co widać: adres, tytuł, początek tekstu, liczbę elementów. */
 const signature = (o: Observation) => `${pageKey(o.url)}|${o.title}|${o.elements.length}|${o.text.slice(0, 400)}`;
+/**
+ * Intencja akcji niezależna od numeru elementu: navigate i klik w link pod ten sam adres to to samo („go c.xkcd.com/random/comic”),
+ * klik w przycisk = rola + nazwa. Inne akcje (scroll, wait, type…) nie są liczone — tym zajmuje się wykrywanie pętli.
+ */
+function intentKey(d: Decision, o: Observation): string | null {
+  const go = (u: string) => `go ${pageKey(u.replace(/^https?:\/\//i, "")).toLowerCase()}`;
+  if (d.action === "navigate") return go(d.url);
+  if (d.action === "click") {
+    const el = o.elements.find((e) => e.id === d.target);
+    if (!el) return null;
+    return el.href ? go(el.href) : `click ${el.role} ${el.name.slice(0, 50).toLowerCase()}`;
+  }
+  return null;
+}
 /** „click [5]” → „click [5] „Graj” (button)” — opis celu z obserwacji, w której zapadła decyzja. */
 function describeTarget(d: Decision, o: Observation): string {
   const key = describeDecision(d);
@@ -303,6 +319,8 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
   let deciderErrors = 0;
   let expect: string | undefined;
   let lastProgress = 0;
+  /** Ile razy każda intencja padła od ostatniego zrobionego etapu (xkcd: navigate /random i klik „Random” na zmianę). */
+  const repeats = new Map<string, number>();
   try {
     for (let step = 1; step <= budget; step++) {
       await call.checkpoint(); // pauza / anuluj między krokami
@@ -328,6 +346,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
       if (adv) {
         const doneStage = adv.done;
         lastProgress = step;
+        repeats.clear();
         for (const s of adv.skipped) emit("computer.stage", { id: s.id, title: s.title, status: "skipped", next: trace.current?.id ?? null });
         emit("computer.stage", { id: doneStage.id, title: doneStage.title, status: "done", next: trace.current?.id ?? null });
         log.push(`${step}. ✓ etap ${doneStage.id} „${doneStage.title}” zrobiony${trace.current ? ` — teraz etap ${trace.current.id}` : " — wszystkie etapy zrobione → done"}`);
@@ -352,6 +371,9 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
 
       const key = describeDecision(d);
       const label = describeTarget(d, obs);
+      const intent = intentKey(d, obs);
+      const repeatNo = intent ? (repeats.get(intent) ?? 0) + 1 : 0;
+      if (intent) repeats.set(intent, repeatNo);
 
       // powrót na stronę, na której już był 2× — podpowiedź z notatkami, zamiast kolejnego okrążenia X → Y → Z → X
       // (wyszukiwarki i listy wyników są „hubem” — tam powroty są normalne)
@@ -421,7 +443,7 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
         }
         emit("computer.action", { step, action: d.action, label: key, status: "completed" });
       } catch (e) {
-        actionError = (e as Error).message.split("\n")[0].slice(0, 160);
+        actionError = (e as Error).message.split("\n")[0].slice(0, 280);
         trace.failures.push(`${label}: ${actionError}`);
         emit("computer.action", { step, action: d.action, label: key, status: "failed", error: actionError });
       }
@@ -429,7 +451,8 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
       const visitsBefore = trace.visits.length;
       obs = await observe(); // VERIFY: nowa obserwacja, decyzja w następnej iteracji
       const changed = signature(obs) !== before;
-      if (trace.visits.length > visitsBefore) lastProgress = step;
+      // nowa strona to postęp — chyba że trafiliśmy na nią, powtarzając w kółko tę samą akcję (każde losowanie = „nowa” strona)
+      if (trace.visits.length > visitsBefore && repeatNo < REPEAT_LIMIT) lastProgress = step;
       const outcome = actionError ? `BŁĄD: ${actionError}` : changed ? "ok" : "ok (strona bez zmian)";
       trace.lastAction = `${label} → ${outcome}`;
       const stageNo = d.stage ?? trace.current?.id;
@@ -452,6 +475,15 @@ export async function runComputerTask(o: RunOptions): Promise<ToolResult> {
         lastKey = "";
       } else if (d.action === "wait" && streak >= 1) {
         log.push(`${step}. (${key} ×${streak + 1} — strona się nie zmienia; czekanie nie pomaga: kliknij, scrolluj, navigate albo zakończ done/fail)`);
+      }
+
+      // POWTARZANIE: ta sama intencja N× od ostatniego etapu, choć strona za każdym razem się zmienia — akcja działa, to decydent nie uznaje wyniku
+      if (changed && !actionError && repeatNo >= REPEAT_LIMIT && repeatNo % REPEAT_LIMIT === 0) {
+        const desc = `${label} powtórzone ${repeatNo}× (strona za każdym razem się zmieniała)`;
+        trace.loops.push(desc);
+        emit("computer.loop", { description: desc, count: repeatNo, strategyChange: trace.loops.length < MAX_LOOPS });
+        if (trace.loops.length >= MAX_LOOPS) return finish(trace.notes.length || trace.visits.length > 1 ? "partial" : "failed", `utknąłem: ${trace.loops.length} pętle — ostatnia: ${desc}`);
+        log.push(`${step}. (POWTARZASZ: „${label}” już ${repeatNo}× i za każdym razem strona się zmieniła — ta akcja DZIAŁA. Obecna strona (${obs.title || obs.url}) jest jej wynikiem. Jeśli cel jest losowy/dowolny — odczytaj TĘ stronę i "done". NIE powtarzaj tej akcji ani jej odpowiednika (navigate pod ten sam adres).)`);
       }
 
       // BRAK POSTĘPU: N kroków bez zrobionego etapu, nowej notatki i nowego miejsca — przeplanuj (różne akcje w kółko też się liczą)

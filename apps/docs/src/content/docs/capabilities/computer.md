@@ -57,10 +57,19 @@ flowchart TB
 ```
 
 - **Obserwacja** (przeglądarka): elementy `[N]` z DOM + tekst + hinty + screenshot. DOM, jeśli możliwe; vision (`QWE_COMPUTER_VISION=1`, domyślnie włączone), jeśli potrzebne.
+  - Obrazek: nazwa = `alt`, atrybut `title` osobno jako `dymek(title)` (pole `PageElement.tooltip`) — tam strony trzymają tekst pokazywany po najechaniu, np. żart „alt text” na xkcd.
+  - **Zasłonięcie**: dla widocznych elementów `elementFromPoint` w środku — jeśli klik dostałoby coś innego, element ma `(zasłonięty przez div.x)` (pole `PageElement.occluded`) i ląduje na liście za niezasłoniętymi. Warstwa zasłaniająca ≥ 25% ekranu (najwyższy przodek z `position: fixed`) → hint `OVERLAY: … zasłania N% ekranu i M elementów, box=[…]`.
+  - **Błąd kliku**: z logu Playwrighta wyciągany jest powód („`<div …>` intercepts pointer events” → „klik zasłonięty — `<div …>` przechwytuje kliknięcie”), zamiast samego „Timeout”.
+- **Najpierw zrzut**: decydent przed wyborem `[N]` patrzy na zrzut — reklama, modal albo baner nad stroną → najpierw zamknięcie (przycisk z listy albo `click_at` w X, bo reklamy w iframe nie mają `[N]`); treści jeszcze nie widać → `wait`.
 - **Planner** (`planner.ts`): przed pętlą i przy braku postępu (replan), osobny prompt na tryb. Przykład (desktop): „wejdź do nowej karty w Brave”, a karta już jest na ekranie → koniec w kroku 0.
 - **Etapy planu**: `todo` → `doing` → `done` albo `skipped`. Decydent zalicza etap polem `stage_done`; wcześniejsze, wciąż otwarte etapy stają się `skipped` (poszedł dalej bez nich). Przy zakończeniu `ok` wszystko, co zostało otwarte, też jest `skipped`. Event `computer.stage` niesie `status: done | skipped`.
 - **Budżet kroków** z szacunku plannera; `QWE_COMPUTER_MAX_STEPS` (25) to tylko twardy limit.
-- **Ochrona przed pętlą**: wykrywanie powtórzeń (`computer.loop`) → zmiana strategii.
+- **Ochrona przed pętlą** (`computer.loop`) → zmiana strategii, po 3 pętlach koniec jako `partial`:
+  - ta sama akcja 3× bez zmiany strony,
+  - powrót na stronę odwiedzoną już 2×,
+  - **powtarzanie**: ta sama intencja 3× od ostatniego zrobionego etapu, nawet gdy strona za każdym razem się zmienia. `navigate` i klik w link pod ten sam adres to ta sama intencja (xkcd: `navigate /random` i klik „Random”). Decydent dostaje „POWTARZASZ — akcja działa, obecna strona jest wynikiem”, a nowe strony z takiego powtarzania nie liczą się jako postęp,
+  - brak postępu przez 6 kroków → replan (najwyżej 2).
+- **Cel losowy** („losowy komiks”): pierwsza załadowana strona jest OK; jeśli na zrzucie nie widać jeszcze treści — `wait`, a nie ponowne losowanie.
 - **Notatki**: każda decyzja może nieść `note` — fakt zebrany po drodze, oddawany w raporcie.
 
 ### Akcje decydenta

@@ -18,6 +18,23 @@ export const OBSERVE_SRC = String.raw`function (a) {
   var nodes = Array.prototype.slice.call(document.querySelectorAll(sel));
   Array.prototype.forEach.call(document.querySelectorAll("[" + ATTR + "]"), function (e) { e.removeAttribute(ATTR); });
   var items = [], errors = [], id = 0;
+  // ZASŁONIĘCIE: co naprawdę dostanie klik w środek elementu (reklama, modal, baner zgód nad stroną)
+  var occluders = [];
+  var describeEl = function (t) {
+    var c = typeof t.className === "string" ? t.className.trim().split(/\s+/)[0] : "";
+    return t.tagName.toLowerCase() + (t.id ? "#" + t.id : c ? "." + c : "");
+  };
+  var occluderOf = function (el, r) {
+    var x = Math.min(Math.max(r.left + r.width / 2, 0), vw - 1), y = Math.min(Math.max(r.top + r.height / 2, 0), vh - 1);
+    var t = document.elementFromPoint(x, y);
+    // <area> z mapy obrazka to część tego obrazka, a nie nakładka
+    if (!t || t === el || el.contains(t) || t.contains(el) || t.tagName === "AREA") return null;
+    // nakładka = najwyższy przodek z position: fixed (cała warstwa), a jak takiego nie ma — sam element na wierzchu
+    var top = t;
+    for (var p = t; p && p !== document.body; p = p.parentElement) if (getComputedStyle(p).position === "fixed") top = p;
+    if (occluders.indexOf(top) === -1) occluders.push(top);
+    return top;
+  };
   for (var i = 0; i < nodes.length; i++) {
     var el = nodes[i];
     try {
@@ -32,15 +49,21 @@ export const OBSERVE_SRC = String.raw`function (a) {
       else if (tag === "select") role = "select";
       else if (tag === "summary") role = "button";
       var name = (str(el.getAttribute("aria-label")) || str(el.innerText) || str(el.textContent) || str(el.getAttribute("placeholder")) || str(el.getAttribute("title")) || str(el.getAttribute("alt")) || str(el.labels && el.labels[0] && el.labels[0].innerText) || str(el.value) || str(el.getAttribute("name")) || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      var tooltip = "";
       if (MEDIA[tag]) {
         if (tag === "img" && (r.width < 40 || r.height < 40)) continue;
         role = tag;
+        // obrazek: nazwa = alt (to, co opisuje obrazek), a title osobno jako dymek — np. xkcd trzyma żart w title (tekst „alt” po najechaniu)
+        if (tag === "img") name = (str(el.getAttribute("alt")) || str(el.getAttribute("aria-label"))).replace(/\s+/g, " ").trim().slice(0, 120);
+        tooltip = str(el.getAttribute("title")).replace(/\s+/g, " ").trim().slice(0, 400);
         if (!name) name = tag + " " + Math.round(r.width) + "x" + Math.round(r.height) + (el.id ? " #" + el.id : "");
       }
       if (!name && role !== "textbox") continue;
       id++;
       el.setAttribute(ATTR, String(id));
       var item = { id: id, role: role, name: name, inViewport: r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw, top: r.top };
+      if (item.inViewport) { var occ = occluderOf(el, r); if (occ) item.occluded = describeEl(occ); }
+      if (tooltip && tooltip !== name) item.tooltip = tooltip;
       if (MEDIA[tag]) item.box = [r.left / vw, r.top / vh, r.width / vw, r.height / vh].map(function (v) { return Math.round(v * 100) / 100; });
       if (tag === "a") {
         // <a> w SVG ma .href jako SVGAnimatedString — bierzemy atrybut i rozwiązujemy względem strony
@@ -56,7 +79,9 @@ export const OBSERVE_SRC = String.raw`function (a) {
       items.push(item);
     } catch (e) { errors.push(String(e && e.message || e)); }
   }
-  items.sort(function (x, y) { return Number(y.inViewport) - Number(x.inViewport) || x.top - y.top; });
+  // najpierw to, w co da się kliknąć: widoczne i niezasłonięte
+  var rank = function (e) { return e.inViewport ? (e.occluded ? 1 : 2) : 0; };
+  items.sort(function (x, y) { return rank(y) - rank(x) || x.top - y.top; });
   var elements = items.slice(0, maxElements).map(function (e) { var c = Object.assign({}, e); delete c.top; return c; });
   var textParts = [];
   var tnodes = document.querySelectorAll("h1, h2, h3, p, li, td, th, [role=alert], [role=status]");
@@ -76,6 +101,14 @@ export const OBSERVE_SRC = String.raw`function (a) {
   if (/captcha|recaptcha|hcaptcha/i.test(bodyHtml)) hints.push("CAPTCHA_SUSPECTED");
   if (/cookie|ciasteczk|rodo|gdpr/i.test(bodyText) && document.querySelector('[id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i]')) hints.push("COOKIE_BANNER");
   if (document.body && document.body.scrollHeight > vh * 1.5) hints.push("PAGE_SCROLLABLE");
+  // OVERLAY: warstwa zasłaniająca co najmniej ćwierć ekranu — z ramką, żeby decydent mógł ją zamknąć (X w iframe nie ma [N])
+  for (var k = 0; k < occluders.length; k++) {
+    var ob = occluders[k].getBoundingClientRect();
+    var area = (Math.max(0, Math.min(ob.right, vw) - Math.max(ob.left, 0)) * Math.max(0, Math.min(ob.bottom, vh) - Math.max(ob.top, 0))) / (vw * vh);
+    var hit = items.filter(function (e) { return e.occluded === describeEl(occluders[k]); }).length;
+    if (area < 0.25 || !hit) continue;
+    hints.push("OVERLAY: " + describeEl(occluders[k]) + (occluders[k].tagName === "IFRAME" || occluders[k].querySelector("iframe") ? " (iframe — reklama?)" : "") + " zasłania " + Math.round(area * 100) + "% ekranu i " + hit + " elementów, box=[" + [ob.left / vw, ob.top / vh, ob.width / vw, ob.height / vh].map(function (v) { return Math.round(v * 100) / 100; }).join(",") + "] — zamknij ją, zanim klikniesz coś pod spodem");
+  }
   if (errors.length) hints.push("ELEMENT_ERRORS: " + errors.length + " (" + errors[0].slice(0, 80) + ")");
   return { url: location.href, title: document.title, elements: elements, text: textParts.join("\n").slice(0, textChars), hints: hints };
 }`;

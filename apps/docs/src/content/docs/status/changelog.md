@@ -7,6 +7,20 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-20 — computer: nakładki i najpierw zrzut
+
+- Obserwacja wykrywa zasłonięcie: `PageElement.occluded` („zasłonięty przez div.x”) i hint `OVERLAY` z ramką warstwy. Powód: na joemonster.org decydent 4× klikał link pod pełnoekranową reklamą / banerem zgód, bo lista elementów pokazywała go jako widoczny.
+- Błąd kliku niesie powód z logu Playwrighta („klik zasłonięty — `<div …>` przechwytuje kliknięcie”) zamiast „Timeout 6000ms”.
+- Prompt decydenta: najpierw zrzut — nakładkę zamknij (też `click_at` w X w iframe), treści nie widać → `wait`. Reguły o celach losowych skrócone do jednej linijki; cofnięta heurystyka nagłówków z `title` w id/klasie.
+- Strony docsów: [Computer](/capabilities/computer/), [Testy](/development/testing/).
+
+## 2026-11-19 — computer: powtarzanie mimo zmian strony
+
+- Executor wykrywa **powtarzanie**: ta sama intencja (`navigate` albo klik w link pod ten sam adres, klik w ten sam przycisk) 3× od ostatniego zrobionego etapu → `computer.loop` z opisem „powtórzone N× (strona za każdym razem się zmieniała)”, nawet gdy każda akcja zmienia stronę. Nowe strony z powtarzania nie zerują licznika braku postępu. Powód: na xkcd `/random` executor 19 kroków losował komiksy, bo każdy „nowy” adres liczył się jako postęp.
+- `PageElement.tooltip`: atrybut `title` obrazka osobno od `alt` (w obserwacji `dymek(title): "…"`).
+- Prompty plannera i decydenta: cel losowy = pierwsza załadowana strona.
+- Strony docsów: [Computer](/capabilities/computer/), [Testy](/development/testing/).
+
 ## 2026-11-17 — sprzątanie przed publicznym repo
 
 - `agents/` jest poza gitem: simy, ich pamięć i skille zmieniają się w trakcie rozmów. Kompletny przykład sima (plugin `pantry`, skill, spiżarnia): `examples/kucharz`.
