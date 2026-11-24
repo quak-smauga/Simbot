@@ -12,6 +12,7 @@ sources:
   - apps/agent/src/runtime.ts
   - apps/chat/src/mcp.ts
   - apps/chat/src/bots.ts
+  - robot-mcp.mjs
   - apps/chat/public/ui/mcp.js
 ---
 
@@ -133,3 +134,47 @@ Menu przy imieniu → **Serwery MCP** (`#mcp`): lista ze stanem na żywo, po roz
 ## Serwer testowy
 
 `kwak-mcp.mjs` w korzeniu repo (stdio albo `--http 3333`): narzędzia `kwaknij`, `rzuc_kostka`, `madrosc_kaczki`, `nakarm_kaczki`, `wkurz_kaczke` (zawsze błąd), zasoby `kwak://staw` i `kwak://regulamin`, prompt `kaczy_debugging`. Używa go selftest `pnpm --filter @qwe/mcp test`.
+
+## Serwer robota
+
+`robot-mcp.mjs` w korzeniu repo (stdio albo `--http 3334`, tylko `127.0.0.1`) steruje jeżdżącym robotem Simbota: ESP32 + mostek L298N + podwozie 2WD. Bez zależności, tak jak `kwak-mcp.mjs`. Serwer tłumaczy wywołania MCP na HTTP API firmware:
+
+| Firmware | Co robi |
+|---|---|
+| `POST /api/move` `{ direction, duration_ms }` | ruch `forward` / `backward` / `left` / `right` na zadany czas; firmware sam staje i przycina czas do 1200 ms |
+| `POST /api/stop` | natychmiastowy stop |
+| `GET /api/status` | `moving`, `wifi`, `ip` (bez tokenu) |
+
+`move` i `stop` wymagają nagłówka `X-Simbot-Token`.
+
+| Narzędzie | Argumenty | Uwagi |
+|---|---|---|
+| `jedz` | `kierunek` (`przod` \| `tyl` \| `lewo` \| `prawo`), `czas_ms` (50–1200) | wraca, gdy robot już stoi; `lewo` / `prawo` to obrót w miejscu |
+| `sekwencja` | `ruchy`: lista `{kierunek, czas_ms}`, najwyżej 12 | cała lista jest sprawdzana przed pierwszym ruchem; przy błędzie w trakcie robot dostaje `stop` |
+| `stop` | — | działa zawsze |
+| `status` | — | tylko odczyt (`readOnlyHint`) |
+
+Zasób `robot://instrukcja` opisuje, jak jeździć: robot nie ma czujników, więc steruje się czasem, a nie odległością. Wywołania idą po kolei (dwa naraz się nie nakładają). Błąd robota (wyłączony, zły token, zły kierunek) wraca jako wynik narzędzia z `isError`, nie jako błąd protokołu.
+
+Zmienne środowiskowe serwera (w `data/mcp.json` → `env`):
+
+| Zmienna | Znaczenie |
+|---|---|
+| `ROBOT_URL` | adres robota, domyślnie `http://simbot.local` (mDNS). Po pierwszym `status` serwer rozmawia po IP, które robot podał |
+| `ROBOT_TOKEN` | `apiToken` z firmware. Bez niego działa tylko `status` |
+
+```json
+{
+  "mcpServers": {
+    "robot": { "command": "node", "args": ["robot-mcp.mjs"], "env": { "ROBOT_URL": "http://simbot.local", "ROBOT_TOKEN": "…" } }
+  }
+}
+```
+
+Sim potrzebuje `robot` na liście `capabilities.mcp` w manifeście. Żadne narzędzie nie ma `destructiveHint`, więc przy domyślnej polityce ruch nie pyta o zgodę; `"confirm": "always"` w konfiguracji serwera włącza potwierdzenie każdego ruchu.
+
+```xml
+<nativeapi>
+  <mcp.robot.sekwencja>{"ruchy": [{"kierunek": "przod", "czas_ms": 400}, {"kierunek": "prawo", "czas_ms": 250}]}</mcp.robot.sekwencja>
+</nativeapi>
+```
