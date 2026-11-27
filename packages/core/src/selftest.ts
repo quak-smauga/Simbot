@@ -4,7 +4,7 @@ import { ToolStreamParser, parseNativeBlock, withClosedTag } from "./nativeapi.j
 import { executePlan, validatePlan } from "./plan.js";
 import { extractJson } from "./llm.js";
 import { matchVoiceCommand, containsPhrase } from "./text.js";
-import { parseMentions, resolveTargets, userSlug } from "./mentions.js";
+import { parseMentions, resolveTargets, userSlug, voiceAddress } from "./mentions.js";
 
 let n = 0;
 const test = async (name: string, fn: () => void | Promise<void>) => {
@@ -125,10 +125,42 @@ await test("mentions: @sim, @sim.task, @user, nieznany, spoza rozmowy, bez @ →
   assert.deepEqual(only.bots, [{ name: "ksiegowy", action: "ask", joined: false }]);
   assert.deepEqual(only.absent, ["audytor"]);
   assert.deepEqual(resolveTargets("cześć", o).bots, [{ name: "ksiegowy", action: "ask", joined: false }]);
+  // adopt (wiadomość usera w chat serverze): wołany spoza rozmowy dołącza i odpowiada sam, bez prowadzącego
+  const adopted = resolveTargets("@audytor.task zerknij", { ...o, adopt: true });
+  assert.deepEqual(adopted.bots, [{ name: "audytor", action: "task", joined: true }]);
+  assert.deepEqual(adopted.absent, []);
+  // …ale sim nie wciąga nikogo spoza rozmowy, nawet z adopt
+  assert.deepEqual(resolveTargets("@audytor zerknij", { ...o, adopt: true, from: "ksiegowy" }).absent, ["audytor"]);
   // sim pisze: bez @ nikt nie odpowiada, sam siebie nie woła
   assert.deepEqual(resolveTargets("robię @ksiegowy @simson", { ...o, from: "ksiegowy" }).bots, []);
-  assert.deepEqual(resolveTargets("robię @simson", { ...o, members: ["ksiegowy", "simson"], from: "ksiegowy" }).bots, [{ name: "simson", action: "ask", joined: false }]);
+  assert.deepEqual(resolveTargets("Robię. @simson sprawdź", { ...o, members: ["ksiegowy", "simson"], from: "ksiegowy" }).bots, [{ name: "simson", action: "ask", joined: false }]);
   assert.deepEqual(parseMentions("@audytor: sprawdziłem. @kacper potwierdzasz?").map((m) => m.name), ["kacper"]);
+  // omawianie funkcji nie woła: `@sim` w kodzie, blok ```, cytat >
+  const talk = "Chip `Odpowiada: @ksiegowy` nad polem.\n```\n@audytor sprawdź\n```\n> @simson pisał wcześniej\nA wołam @ksiegowy.task wprost";
+  assert.deepEqual(parseMentions(talk).map((m) => [m.name, m.action]), [["ksiegowy", "task"]]);
+  assert.equal(talk.slice(parseMentions(talk)[0].index, parseMentions(talk)[0].index + 9), "@ksiegowy");
+  assert.deepEqual(resolveTargets("dyskusja o `@audytor` i tyle", { ...o, from: "ksiegowy" }).bots, []);
+  assert.equal(resolveTargets("cześć", o).defaulted, true);
+  assert.equal(resolveTargets("@ksiegowy cześć", o).defaulted, false);
+  // cudzysłów to też omawianie: „@sima → @ksiegowy” (tak księgowy niechcący zawołał Simę)
+  assert.deepEqual(parseMentions("linia „@sima → @ksiegowy” w wątku, \"@audytor\" też nie, a @simson tak").map((m) => m.name), ["simson"]);
+  // spacja po wzmiance (Enter w autocomplete) nie zmienia wyniku
+  assert.deepEqual(resolveTargets("@ksiegowy ", o).bots, resolveTargets("@ksiegowy", o).bots);
+  // dwa @ w jednej wiadomości: odpowiadają po kolei, prowadzić będzie pierwszy (session.setLead(bots[0]))
+  const two = { ...o, members: ["ksiegowy", "simson"] };
+  assert.deepEqual(resolveTargets("@simson test 1 @ksiegowy test 2", two).bots.map((b) => b.name), ["simson", "ksiegowy"]);
+  // sim: @ w środku zdania to wzmianka, woła tylko @ na początku zdania/linii/punktu
+  const room = { ...o, members: ["ksiegowy", "sima"], known: [...o.known, "sima"], from: "ksiegowy" };
+  assert.deepEqual(resolveTargets("Ostatnią wiadomość napisał @sima i nikogo nie zawołał.", room).bots, []);
+  assert.deepEqual(resolveTargets("Gotowe. @sima, sprawdź sumy.", room).bots.map((b) => b.name), ["sima"]);
+  assert.deepEqual(resolveTargets("Plan:\n- @sima poszukaj kursu", room).bots.map((b) => b.name), ["sima"]);
+  assert.deepEqual(resolveTargets("Jasne, przekazuję pałeczkę. **@sima** zamknij", room).bots.map((b) => b.name), ["sima"]);
+  // user woła z dowolnego miejsca zdania
+  assert.deepEqual(resolveTargets("a teraz niech @ksiegowy policzy", o).bots.map((b) => b.name), ["ksiegowy"]);
+  // głos: nazwa sima na początku transkrypcji (też wołacz i „hej”)
+  assert.equal(voiceAddress("Księgowy, policz VAT", ["sima", "ksiegowy"]), "ksiegowy");
+  assert.equal(voiceAddress("hej Simo co tam", ["sima", "ksiegowy"]), "sima");
+  assert.equal(voiceAddress("policz to księgowy", ["sima", "ksiegowy"]), null);
   assert.equal(userSlug("Kacper Walczak"), "kacper");
   assert.equal(userSlug("Łukasz"), "lukasz");
   assert.equal(userSlug(""), "ty");

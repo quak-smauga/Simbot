@@ -62,7 +62,7 @@ Typowana mapa `ChatEvents` w `apps/chat/src/events.ts`. Eventy agenta są re-emi
 | Tor | Eventy |
 |---|---|
 | user | `user.utterance` · `user.heard` · `user.text` · `user.level` · `user.interrupt` · `user.command` |
-| sim | `agent.state` · `bot.turn` · `agent.thinking` · `agent.error` · `assistant.message` · `mention.user` · `mention.absent` |
+| sim | `agent.state` · `bot.turn` · `agent.thinking` · `agent.error` · `assistant.message` · `mention.user` · `mention.absent` · `chain.limit` |
 | narzędzia | `tool.call` · `tool.result` (po stronie chatu: `callId`, `taskId`, `bot`, `found`) |
 | mowa | `say.start` · `say.text` · `say.end` · `voice.chunk` · `voice.end` · `voice.played` · `voice.abort` |
 | rozmowa | `session.voice` · `session.title` · `session.reset` · `session.members` · `session.workflow` · `memory.saved` |

@@ -64,6 +64,13 @@ Payload każdego zdarzenia SSE to [`AgentEvent`](/events/). Chat trzyma **jedno*
 
 Narzędzia `mcp.*` nie są w rejestrze capability — runtime pyta o nie menedżera (`dynamicTool`). Patrz [Serwery MCP](/capabilities/mcp/).
 
+## Modele (LLM)
+
+| Metoda | Ścieżka | Opis |
+|---|---|---|
+| `GET` | `/api/llm` | `{ selection, chat, tools }` — aktualny wybór i `ModelCaps` slotów |
+| `POST` | `/api/llm` | `{ selection: LlmSelection \| null }` — wysyła chat po starcie agenta i po każdej zmianie w UI. Przy spawnie wybór idzie też w env `QWE_LLM` |
+
 ## Screenshoty i dashboard
 
 | Metoda | Ścieżka | Opis |

@@ -1,6 +1,6 @@
 // APP — user → simy → rozmowy (jeden sim albo grupa) → @ → powiadomienia. Sidebar (simy + rozmowy), wątek, composer z @,
 // panel work (desktop), głos (kropka), strony: sim / workflowy / puste stany. Lobby WS trzyma listę rozmów na żywo.
-import { $, api, confirmBox, esc, isDesktop, mentions, splitTitle, timeAgo, toast } from './dom.js';
+import { $, api, confirmBox, esc, isDesktop, mentions, setMentionColor, splitTitle, timeAgo, toast } from './dom.js';
 import { md } from './markdown.js';
 import { connect } from './net.js';
 import { makePlayer, openMic } from './audio.js';
@@ -11,17 +11,23 @@ import { makeLogo, blinkLogos } from './logo.js';
 import { cfgOf } from './builder.js';
 import { attachMentions } from './mentions.js';
 import { newSimDialog, renderSimPage } from './sims.js';
-import { addSimToChatDialog, profileDialog, renderEmpty, renderWorkflowsPage, workflowEditor } from './pages.js';
+import { profileDialog, renderEmpty, renderWorkflowsPage, workflowEditor } from './pages.js';
 import { renderMcpPage } from './mcp.js';
 import { icon } from './icons.js';
+import { initModels, modelCaps } from './models.js';
+import { filesHtml, initAttach } from './attach.js';
+import { initFiles } from './files.js';
 
 // ikony z data-icon (Lucide) — raz na start, potem w szablonach przez icon()
 const hydrateIcons = root => root.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon, el.dataset.size ? Number(el.dataset.size) : undefined); el.removeAttribute('data-icon'); });
 hydrateIcons(document);
+initModels();
 
 const STATE_PL = { idle: 'gotowy', listening: 'słucham', thinking: 'myśli', speaking: 'mówi', working: 'pracuje', waiting_user: 'czeka na Ciebie' };
 const AV_STATE = { idle: 'idle', listening: 'listening', thinking: 'thinking', speaking: 'speaking', working: 'working', waiting_user: 'confused' };
 const timeline = $('timeline'), tl = $('tl'), input = $('input');
+let attach = null; // załączniki (attach.js) — ustawiane przy composerze niżej
+let files = null; // panel plików rozmowy (files.js)
 
 // ───────── motyw ─────────
 const theme = {
@@ -50,7 +56,7 @@ const nav = {
 // 960–1240px z otwartym komputerem: na sidebar nie ma miejsca (CSS zwija go do 0) → przycisk menu wysuwa go jako nakładkę („peek”),
 // komputer zostaje otwarty. Peek znika po wyborze rozmowy, kliknięciu w tło, Esc albo zamknięciu komputera.
 const squeezeMq = matchMedia('(min-width: 960px) and (max-width: 1240px)');
-const navSqueezed = () => squeezeMq.matches && document.body.dataset.work === 'open';
+const navSqueezed = () => squeezeMq.matches && (document.body.dataset.work === 'open' || document.body.dataset.files === 'open');
 const peek = { set(on) { document.body.toggleAttribute('data-peek', !!on); }, get on() { return document.body.hasAttribute('data-peek'); } };
 const toggleNav = () => (navSqueezed() ? peek.set(!peek.on) : nav.set(!nav.open));
 const closeNav = () => (peek.on ? peek.set(false) : nav.set(false));
@@ -80,12 +86,12 @@ const app = {
 /** Simy widoczne (app.bots) + Sima — domyślna, poza listą simów. */
 app.allBots = () => (app.sima ? [app.sima, ...app.bots] : app.bots);
 const botOf = name => app.allBots().find(b => b.name === name);
-const isSimaOnly = () => !app.members.some(m => m !== app.sima?.name);
 const avatarOf = (name, size = 34, state) => { const b = botOf(name); return b ? makeAvatar({ ...cfgOf(b.look), id: b.name, state }, size) : null; };
 const meCfg = () => cfgOf(app.config.me.look);
 const meAvatar = (size = 34) => makeAvatar({ ...meCfg(), id: '@me' }, size);
 const known = () => app.allBots().map(b => b.name);
-const work = { open(on) { document.body.dataset.work = on ? 'open' : 'closed'; if (!on) peek.set(false); }, get isOpen() { return document.body.dataset.work === 'open'; } };
+setMentionColor(n => { const b = botOf(n); return b ? cfgOf(b.look).color || '' : ''; });
+const work = { open(on) { document.body.dataset.work = on ? 'open' : 'closed'; if (!on && !(files && files.isOpen)) peek.set(false); }, get isOpen() { return document.body.dataset.work === 'open'; } };
 $('workClose').onclick = () => work.open(false);
 
 app.cards = createCards({
@@ -179,21 +185,13 @@ app.addSim = async (opts = {}) => {
   if (!opts.quiet) showSim(b.name);
   return b;
 };
-/** „Dodaj sima” w rozmowie z Simą: obok Simy albo zamiast niej. */
-app.addSimToChat = async () => {
-  const r = await addSimToChatDialog(app);
-  if (!r || !app.current) return;
-  const keep = r.replace ? app.members.filter(m => m !== app.sima?.name) : app.members;
-  try { await api.patch(`/api/sessions/${app.current}`, { bots: [...keep.filter(m => m !== r.bot), r.bot] }); } catch (e) { toast(e.message); }
-};
 app.afterSimRemoved = () => { app.current ? openSession(app.current) : pickFirstOrEmpty(); };
 function pickFirstOrEmpty() { if (app.sessions.length) openSession(app.sessions[0].id); else showPage('empty', 'nochat'); }
 $('newBtn').onclick = () => app.quickSession();
-$('addSimBtn').onclick = () => app.addSimToChat();
 
 // ───────── strony ─────────
 function showPage(p, arg) {
-  app.page = p; app.pageArg = arg;
+  app.page = p; app.pageArg = arg; document.body.dataset.page = p;
   const chat = p === 'chat';
   $('timeline').hidden = !chat; $('page').hidden = chat; $('composer').hidden = !chat; $('head').hidden = !chat; $('pagebar').hidden = chat;
   $('pageBack').hidden = !app.current || !app.sessions.some(s => s.id === app.current);
@@ -215,6 +213,8 @@ async function openSession(id) {
   shell && shell.setSession(id);
   app.page = 'chat';
   thinking.el = null; app.streaming = null; app.lastAuthor = null; app.authors = new Set(); app.cards.clear(); work.open(false);
+  attach && attach.clear();
+  files && files.setSession(id);
   tl.innerHTML = '';
   const sk = document.createElement('div'); sk.className = 'tl-sk'; sk.innerHTML = skeleton({ lines: 3 }) + '<div style="height:18px"></div>' + skeleton({ lines: 2 }); tl.appendChild(sk);
   showPage('chat');
@@ -230,7 +230,7 @@ async function openSession(id) {
   ].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
   for (const it of items) {
     if (it.msg) {
-      if (it.msg.role === 'user') addUser(it.msg.content, it.msg.meta && it.msg.meta.source, it.msg.at);
+      if (it.msg.role === 'user') addUser(it.msg.content, it.msg.meta && it.msg.meta.source, it.msg.at, it.msg.meta && it.msg.meta.files);
       else { const t = (it.msg.meta && it.msg.meta.spoken) || stripBlock(it.msg.content); if (t) addBot(it.msg.author, t, it.msg.at); }
     } else if (it.ev.type === 'memory.saved') memoryMemo(it.ev);
     else if (it.ev.type === 'skill.saved') { skillMemo(it.ev); app.cards.handle(it.ev.type, it.ev); }
@@ -254,7 +254,7 @@ function noteAuthor(name) { if (!app.authors) app.authors = new Set(); if (!app.
 function renderThreadEmpty() {
   const m = app.members.map(n => botOf(n)).filter(Boolean);
   const el = document.createElement('div'); el.className = 'empty'; el.id = 'empty';
-  el.innerHTML = `<div class="avs" id="emAvs"></div><h2>${m.length > 1 ? `${m.map(b => '@' + esc(b.name)).join(', ')}` : m[0] ? `@${esc(m[0].name)}` : 'Rozmowa'}</h2><p>${m.length > 1 ? 'Grupa. Bez @ odpowiada pierwszy sim; <code class="kbd">@nazwa</code> zwraca się do konkretnego, <code class="kbd">@nazwa.task</code> zleca zadanie. Simy mogą wołać siebie nawzajem i Ciebie.' : m[0] && m[0].name === app.sima?.name ? 'Napisz albo mów — Sima poszuka w sieci albo weźmie komputer. Potrzebujesz specjalisty? <b>Dodaj sima</b> u góry.' : m[0] ? esc(m[0].description || 'Napisz albo mów. Sim poszuka w sieci albo weźmie komputer — każdy krok zobaczysz tutaj.') : 'Dodaj sima do rozmowy (przycisk u góry).'}</p>${app.workflow ? `<span class="hint">workflow: <b>${esc(app.workflow.name)}</b></span>` : ''}`;
+  el.innerHTML = `<div class="avs" id="emAvs"></div><h2>${m.length > 1 ? `${m.map(b => '@' + esc(b.name)).join(', ')}` : m[0] ? `@${esc(m[0].name)}` : 'Rozmowa'}</h2><p>${m.length > 1 ? 'Grupa. Bez @ odpowiada pierwszy sim; <code class="kbd">@nazwa</code> zwraca się do konkretnego, <code class="kbd">@nazwa.task</code> zleca zadanie. Simy mogą wołać siebie nawzajem i Ciebie.' : m[0] && m[0].name === app.sima?.name ? 'Napisz albo mów — Sima poszuka w sieci albo weźmie komputer. Potrzebujesz specjalisty? Napisz <code class="kbd">@nazwa</code> — przejmie rozmowę.' : m[0] ? esc(m[0].description || 'Napisz albo mów. Sim poszuka w sieci albo weźmie komputer — każdy krok zobaczysz tutaj.') : 'Napisz <code class="kbd">@nazwa</code>, żeby zawołać sima.'}</p>${app.workflow ? `<span class="hint">workflow: <b>${esc(app.workflow.name)}</b></span>` : ''}`;
   tl.append(el);
   m.forEach(b => $('emAvs').append(makeAvatar({ ...cfgOf(b.look), id: b.name }, 56)));
 }
@@ -265,7 +265,7 @@ function renderHead() {
   $('headAv').innerHTML = '';
   headAv = mountGroup($('headAv'), app.members.map(n => botOf(n)).filter(Boolean).map(b => ({ ...cfgOf(b.look), id: b.name })), 40);
   const mem = app.members.map(n => `@${esc(n)}`).join(' · ');
-  $('addSimBtn').hidden = !isSimaOnly();
+  renderLead();
   $('headSub').innerHTML = `<span class="st" data-state="${app.state}"><i></i><span id="stateText">${STATE_PL[app.state] || app.state}</span></span>${mem ? `<span>·</span><span style="overflow:hidden;text-overflow:ellipsis">${mem}</span>` : ''}${app.workflow ? `<span>·</span><span class="wf" title="workflow">${icon('workflow', 13)} ${esc(app.workflow.name)}</span>` : ''}`;
 }
 function setTitle(title, pending) {
@@ -285,13 +285,14 @@ function renderDd() {
   $('dd').innerHTML = `<div class="k">w tej rozmowie</div>${app.members.map(n => { const b = botOf(n); return `<div class="mem" data-m="${esc(n)}"><span class="av"></span>@${esc(n)}<small>${esc(b?.description || '')}</small>${app.members.length > 1 ? `<button class="x" data-rm="${esc(n)}" title="Usuń z rozmowy">${icon('x', 14)}</button>` : ''}</div>`; }).join('')}<div class="mem"><span class="av" id="ddMe"></span>${esc(app.config.me.name)}<small>Ty · @${esc(app.config.me.slug)}</small></div>
     ${others.length ? `<hr/><div class="k">dodaj sima</div>${others.map(b => `<button data-add="${esc(b.name)}"><span class="av"></span>@${esc(b.name)}<small style="color:var(--ink-3);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${esc(b.description)}</small></button>`).join('')}` : ''}
     <hr/><div class="k">workflow</div><div class="row"><select class="input" id="ddWf" style="padding:8px 10px;font-size:13px"><option value="">bez workflow</option>${app.config.workflows.map(w => `<option value="${esc(w.id)}"${app.workflow && w.id === app.workflow.id ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}<option value="__new">+ nowy…</option></select>${app.workflow ? `<button class="ib" id="ddWfEdit" title="Edytuj workflow">${icon('pencil', 16)}</button>` : ''}</div>
-    <hr/><button id="ddClear">${icon('brush')}Wyczyść historię</button><button id="ddDel" style="color:var(--bad)">${icon('trash-2')}Usuń rozmowę</button>`;
+    <hr/><button id="ddFiles">${icon('folder-open')}Otwórz folder plików</button><button id="ddClear">${icon('brush')}Wyczyść historię</button><button id="ddDel" style="color:var(--bad)">${icon('trash-2')}Usuń rozmowę</button>`;
   $('dd').querySelectorAll('.mem[data-m]').forEach(el => { const a = avatarOf(el.dataset.m, 22); if (a) el.querySelector('.av').append(a); });
   $('ddMe').append(meAvatar(22));
   $('dd').querySelectorAll('[data-add]').forEach(b => { const a = avatarOf(b.dataset.add, 22); if (a) b.querySelector('.av').append(a); b.onclick = () => { app.net && app.net.send({ t: 'member.add', bot: b.dataset.add }); $('dd').hidden = true; }; });
   $('dd').querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { app.net && app.net.send({ t: 'member.remove', bot: b.dataset.rm }); $('dd').hidden = true; });
   $('ddWf').onchange = async e => { if (e.target.value === '__new') { $('dd').hidden = true; const w = await workflowEditor(app); if (w) app.net && app.net.send({ t: 'workflow', workflowId: w.id }); } else app.net && app.net.send({ t: 'workflow', workflowId: e.target.value || null }); };
   const ed = $('ddWfEdit'); if (ed) ed.onclick = async () => { $('dd').hidden = true; const w = app.config.workflows.find(x => x.id === app.workflow.id); const full = (await api.get('/api/workflows')).workflows.find(x => x.id === w.id); const r = await workflowEditor(app, full); if (r === null) app.workflow = null; else if (r) app.workflow = { id: r.id, name: r.name }; renderHead(); };
+  $('ddFiles').onclick = async () => { $('dd').hidden = true; try { await api.post(`/api/sessions/${app.current}/files/open`); } catch (e) { toast(e.message); } };
   $('ddClear').onclick = async () => { $('dd').hidden = true; if (!(await confirmBox('Wyczyścić historię?', 'Wiadomości i karty tej rozmowy znikną.', 'Wyczyść'))) return; app.net && app.net.reset(); openSession(app.current); };
   $('ddDel').onclick = async () => { $('dd').hidden = true; if (!(await confirmBox('Usunąć rozmowę?', 'Historia i karty zadań znikną. Simy i ich pamięć zostają.'))) return; await api.del(`/api/sessions/${app.current}`); app.current = null; await loadSessions(); pickFirstOrEmpty(); };
 }
@@ -312,10 +313,10 @@ function scrollDown(force) { if (force) stick = true; if (stick) timeline.scroll
 $('jumpBtn').onclick = () => { timeline.scrollTo({ top: timeline.scrollHeight, behavior: 'smooth' }); stick = true; };
 const clearEmpty = () => $('empty')?.remove();
 
-function addUser(text, source, at) {
+function addUser(text, source, at, files) {
   clearEmpty(); app.lastAuthor = '@me';
   const el = document.createElement('div'); el.className = 'msg msg--me';
-  el.innerHTML = `<div class="msg__body">${mentions(esc(text), { user: app.config.me.slug, known: known() })}</div>${metaHtml(at, source === 'stt' ? '🎙 głosem' : '')}`;
+  el.innerHTML = `${filesHtml(app.current, files)}${text ? `<div class="msg__body">${mentions(esc(text), { user: app.config.me.slug, known: known() })}</div>` : ''}${metaHtml(at, source === 'stt' ? '🎙 głosem' : '')}`;
   bindTools(el, () => text);
   tl.appendChild(el); scrollDown(true);
   return el;
@@ -380,6 +381,14 @@ function addSys(html, bot) {
   const el = document.createElement('div'); el.className = 'sys'; el.innerHTML = html;
   if (bot) { const a = avatarOf(bot, 16); if (a) el.prepend(a); }
   tl.appendChild(el); scrollDown();
+  return el;
+}
+/** „@a → @b · prowadzi”. Kilka zmian z rzędu (klikanie w chip) zwija się w jedną linię; powrót do punktu wyjścia ją usuwa. */
+function leadLine(prev, lead) {
+  const last = tl.lastElementChild;
+  if (last && last.dataset.leadFrom != null) { prev = last.dataset.leadFrom; last.remove(); }
+  if (prev === lead) return;
+  addSys(`@${esc(prev || '')} → @${esc(lead)} · prowadzi`, lead).dataset.leadFrom = prev || '';
 }
 /** Etykieta chipa pamięci: wspólna o userze vs notatki sima (stare eventy bez scope → jak dawniej). */
 const memoryMemo = ev => addMemo('🧠', ev.scope === 'user' ? 'Zapamiętane o Tobie' : ev.scope === 'sim' ? 'Notatka do pracy' : 'Zapamiętane', ev.added, ev.removed, {
@@ -424,14 +433,23 @@ function onEvent(t, m) {
     case 'agent.state': setState(m.state, m.bot); break;
     case 'bot.turn': app.turnBy = m.by; break; // „dołącza” pokazuje session.members
     case 'mention.absent': absentHint(m.names); break;
+    case 'chain.limit': {
+      // łańcuch sim→sim stanął na limicie z workflow — „Kontynuuj” puszcza simy dalej
+      const el = addSys(`simy wymieniły ${m.hops} ${m.hops === 1 ? 'wiadomość' : 'wiadomości'} bez Ciebie · czeka @${esc(m.next[0])} <button class="sys__go" type="button">Kontynuuj</button>`, m.next[0]);
+      el.querySelector('.sys__go').onclick = e => { e.target.remove(); app.net && app.net.send({ t: 'chain.continue' }); };
+      break;
+    }
     case 'user.heard': app.kropka && app.kropka.blink(); break;
     case 'session.title': setTitle(m.title, !!m.pending); break;
     case 'session.members': {
       app.members = m.members; renderHead(); syncSolo();
       if ($('empty')) { $('empty').remove(); renderThreadEmpty(); } // pusta rozmowa: odśwież powitanie z nowym składem
       else {
-        if (m.left) addSys(`@${esc(m.left)} opuszcza rozmowę`);
-        if (m.joined) addSys(`@${esc(m.joined)} dołącza do rozmowy${m.by && m.by !== app.config.me.slug ? ` (zawołany przez @${esc(m.by)})` : ''}`, m.joined);
+        if (m.left && m.joined) addSys(`@${esc(m.joined)} przejmuje rozmowę od @${esc(m.left)} · teraz on prowadzi`, m.joined);
+        else if (m.left) addSys(`@${esc(m.left)} opuszcza rozmowę`);
+        else if (m.joined && m.lead) addSys(`Dodano @${esc(m.joined)} · teraz prowadzi — bez @ odpowiada on`, m.joined);
+        else if (m.lead && !m.joined) leadLine(m.prev, m.lead);
+        if (m.joined && !m.left && !m.lead) addSys(`@${esc(m.joined)} dołącza do rozmowy${m.by && m.by !== app.config.me.slug ? ` (zawołany przez @${esc(m.by)})` : ''}`, m.joined);
       }
       if (!$('dd').hidden) renderDd();
       loadSessions();
@@ -440,7 +458,7 @@ function onEvent(t, m) {
     case 'session.workflow': app.workflow = m.workflowId ? { id: m.workflowId, name: m.name } : null; renderHead(); if (!$('dd').hidden) renderDd(); if (!$('empty')) addSys(m.workflowId ? `workflow: ${esc(m.name)}` : 'workflow odpięty'); else { $('empty').remove(); renderThreadEmpty(); } break;
     case 'memory.saved': memoryMemo(m); if (app.page === 'sim') app.loadBots().then(() => renderSimPage(app, app.pageArg)); break;
     case 'skill.saved': skillMemo(m); app.cards.handle(t, m); app.loadBots(); break;
-    case 'user.text': addUser(m.text, m.source); break;
+    case 'user.text': addUser(m.text, m.source, undefined, m.files); files && files.refresh(); break;
     case 'mention.user': { const b = botOf(m.bot); toast({ title: `@${m.bot} woła Cię`, text: m.text, avatar: avatarOf(m.bot, 36, 'confused') }); if (b) {/* w tej rozmowie — widać w wątku */} break; }
     case 'say.start': app.streaming = { sayId: m.sayId, bot: m.bot, text: '', el: null }; break;
     case 'say.text':
@@ -498,6 +516,7 @@ function setState(s, bot) {
   if (s === 'thinking' && bot && app.page === 'chat') showThinking(bot); else if (s !== 'speaking') hideThinking();
   const st = $('headSub').querySelector('.st'); if (st) { st.dataset.state = s; st.querySelector('span').textContent = bot && s !== 'idle' && s !== 'listening' ? `@${bot} ${STATE_PL[s] || s}` : STATE_PL[s] || s; }
   $('voiceState').textContent = STATE_PL[s] || s;
+  syncSend();
   app.kropka && app.kropka.setState(s);
   headAv && headAv.setState(AV_STATE[s] || 'idle');
   if (bot) document.querySelectorAll(`.sims .avatar[data-bot="${bot}"]`).forEach(a => setAvatarState(a, AV_STATE[s] || 'idle'));
@@ -526,18 +545,105 @@ function openLobby() {
   });
 }
 
+// ───────── „Odpowiada: @sim” nad polem ─────────
+// Kto usłyszy następną wiadomość: prowadzący (members[0]); gdy w polu jest @sim — podgląd, kto odpowie po wysłaniu
+// (sim spoza rozmowy: „przejmie rozmowę”). Klik = wybór prowadzącego z listy, × = z powrotem Sima.
+// jak maskQuoted w @qwe/core: kod, cytat „>”, tekst w cudzysłowie — to omawianie, nie wołanie
+const maskQuoted = t => t.replace(/```[\s\S]*?(```|$)/g, m => m.replace(/[^\n]/g, ' ')).replace(/`[^`\n]*`/g, m => ' '.repeat(m.length)).replace(/^[ \t]*>.*$/gm, m => ' '.repeat(m.length)).replace(/[„“"«][^„“”"«»\n]{0,160}[”“"»]/g, m => ' '.repeat(m.length));
+function calledIn(text) {
+  for (const m of maskQuoted(text).matchAll(/(^|[^\p{L}\p{N}_@])@([a-z0-9][a-z0-9-]*)(?:\.[a-z]+)?(:?)/giu)) {
+    if (m[3]) continue;
+    const n = m[2].toLowerCase();
+    if (n !== app.config.me.slug && botOf(n)) return n;
+  }
+  return null;
+}
+function renderLead() {
+  const el = $('lead');
+  const lead = app.members[0];
+  const called = app.config && calledIn(input.value);
+  const show = !!lead && app.page === 'chat' && (app.members.length > 1 || (called && called !== lead));
+  el.hidden = !show;
+  if (!show) return;
+  const who = called || lead;
+  const soon = called && called !== lead;
+  const absent = called && !app.members.includes(called);
+  const sima = app.sima?.name;
+  const canReset = !soon && sima && app.members.includes(sima) && lead !== sima;
+  el.className = `lead${soon ? ' soon' : ''}`;
+  el.innerHTML = `<button class="lead__b" id="leadPick" type="button" title="${soon ? 'po wysłaniu' : 'Kto odpowie na wiadomość bez @ — kliknij, żeby zmienić'}"><span class="lead__av"></span><span>${absent ? `<b>@${esc(who)}</b> przejmie rozmowę` : `${soon ? 'Odpowie' : 'Odpowiada'}: <b>@${esc(who)}</b>`}</span>${!soon && app.members.length > 1 ? icon('chevron-down', 13) : ''}</button>${canReset ? `<button class="lead__x" id="leadReset" type="button" title="Z powrotem @${esc(sima)}">${icon('x', 12)}</button>` : ''}`;
+  const a = avatarOf(who, 18); if (a) el.querySelector('.lead__av').append(a);
+  const b = botOf(who); if (b) el.style.setProperty('--lc', cfgOf(b.look).color || 'var(--ink-3)');
+  const r = $('leadReset'); if (r) r.onclick = () => app.net && app.net.send({ t: 'lead', bot: sima });
+  $('leadPick').onclick = () => { if (soon || app.members.length < 2) return; leadMenu(); };
+}
+function leadMenu() {
+  const el = $('lead');
+  let menu = el.querySelector('.lead__menu');
+  if (menu) { menu.remove(); return; }
+  menu = document.createElement('div'); menu.className = 'lead__menu';
+  menu.innerHTML = `<div class="k">kto odpowiada bez @</div>${app.members.map((n, i) => `<button data-lead="${esc(n)}" class="${i === 0 ? 'on' : ''}"><span class="av"></span>@${esc(n)}<small>${esc(botOf(n)?.description || '')}</small></button>`).join('')}`;
+  menu.querySelectorAll('[data-lead]').forEach(btn => { const a = avatarOf(btn.dataset.lead, 20); if (a) btn.querySelector('.av').append(a); btn.onclick = () => { app.net && app.net.send({ t: 'lead', bot: btn.dataset.lead }); menu.remove(); input.focus(); }; });
+  el.append(menu);
+}
+document.addEventListener('mousedown', e => { const m = document.querySelector('.lead__menu'); if (m && !e.target.closest('#lead')) m.remove(); });
+
 // ───────── wysyłanie + @ ─────────
-const mention = attachMentions(input, { anchor: $('cbox'), items: () => [...app.allBots().map(b => ({ name: b.name, label: `@${b.name}`, desc: app.members.includes(b.name) ? (b.description || 'w rozmowie') : 'nie ma w rozmowie — nie odpowie', cfg: cfgOf(b.look), kind: 'sim' })), { name: app.config.me.slug, label: `@${app.config.me.slug}`, desc: 'Ty', cfg: meCfg(), kind: 'user' }] });
+const mention = attachMentions(input, {
+  anchor: $('cbox'),
+  items: () => [...app.allBots().map(b => ({ name: b.name, label: `@${b.name}`, desc: app.members.includes(b.name) ? (b.description || 'w rozmowie') : `przejmie rozmowę${b.description ? ' · ' + b.description : ''}`, cfg: cfgOf(b.look), kind: 'sim' })), { name: app.config.me.slug, label: `@${app.config.me.slug}`, desc: 'Ty', cfg: meCfg(), kind: 'user' }],
+  files: () => (files ? files.all() : []),
+});
+files = initFiles({
+  root: $('fpanelIn'),
+  toggleBtn: $('filesBtn'),
+  session: () => app.current,
+  onMention: paths => insertAtCaret(paths.map(p => `@[${p}]`).join(' ') + ' '),
+  onOpenChange: on => { if (on && work.isOpen) work.open(false); if (!on) peek.set(false); },
+});
+/** Wstawia tekst w miejscu kursora (ze spacją przed, jeśli trzeba) i oddaje fokus polu. */
+function insertAtCaret(text) {
+  const v = input.value, a = input.selectionStart ?? v.length, b = input.selectionEnd ?? v.length;
+  const pre = a > 0 && !/\s$/.test(v.slice(0, a)) ? ' ' : '';
+  input.value = v.slice(0, a) + pre + text + v.slice(b);
+  const pos = a + pre.length + text.length;
+  input.focus(); input.setSelectionRange(pos, pos); autosize();
+}
+// @[ścieżka] w wątku → pokaż w panelu plików
+tl.addEventListener('click', e => { const f = e.target.closest('[data-fpath]'); if (f) { e.preventDefault(); files.reveal(f.dataset.fpath); } });
+attach = initAttach({
+  cbox: $('cbox'),
+  session: () => app.current,
+  canDrop: () => app.page === 'chat' && !!app.current && !document.querySelector('.modal'),
+  onChange: () => autosize(),
+  warnVision: () => { const c = modelCaps(); if (c && !c.vision) toast(`${c.model} nie widzi obrazów — plik trafi do folderu, ale sim go nie zobaczy`); },
+  onUploaded: () => files && files.refresh(),
+});
+input.addEventListener('paste', e => attach.paste(e));
 function send() {
   const text = input.value.trim();
-  if (!text || !app.net) return;
-  input.value = ''; autosize();
-  app.net.text(text);
+  if ((!text && !attach.count) || !app.net) return;
+  if (attach.busy) { toast('Chwila — pliki jeszcze się wysyłają'); return; }
+  const files = attach.ready();
+  if (!text && !files.length) return;
+  input.value = ''; autosize(); renderLead();
+  app.net.send({ t: 'text', text, files });
+  attach.clear();
 }
-$('sendBtn').onclick = send;
+/** Simy myślą/mówią, a pole puste → strzałka staje się Stopem (kończy też łańcuch sim→sim). Z tekstem — wyślij (i tak przerywa łańcuch). */
+const isBusy = () => app.state === 'thinking' || app.state === 'speaking';
+function syncSend() {
+  const b = $('sendBtn'); if (!b) return;
+  const has = !!input.value.trim() || !!(attach && attach.count);
+  const stop = isBusy() && !has;
+  if (b.classList.contains('send--stop') !== stop || !b.firstElementChild) { b.classList.toggle('send--stop', stop); b.innerHTML = icon(stop ? 'square' : 'arrow-up', stop ? 14 : undefined); }
+  b.disabled = !stop && !has;
+  b.title = stop ? 'Zatrzymaj simy (Esc)' : 'Wyślij (Enter)';
+}
+$('sendBtn').onclick = () => { if ($('sendBtn').classList.contains('send--stop')) { app.net && app.net.interrupt(); return; } send(); };
 input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !mention.open) { e.preventDefault(); send(); } });
-input.addEventListener('input', autosize);
-function autosize() { input.style.height = 'auto'; input.style.height = Math.min(160, input.scrollHeight) + 'px'; $('sendBtn').disabled = !input.value.trim(); }
+input.addEventListener('input', () => { autosize(); renderLead(); });
+function autosize() { input.style.height = 'auto'; input.style.height = Math.min(160, input.scrollHeight) + 'px'; syncSend(); }
 
 // ───────── głos ─────────
 const voiceUi = {
@@ -585,7 +691,7 @@ document.addEventListener('keydown', e => {
   if ((e.key === 'f' || e.key === 'F') && app.voiceOn) setVoiceFull(!$('voicePanel').classList.contains('full'));
   if (e.key === 'Escape') {
     if (app.voiceOn && app.state !== 'idle' && app.state !== 'listening') { app.kropka && app.kropka.shrink(); app.net && app.net.interrupt(); return; }
-    if (app.voiceOn && $('voicePanel').classList.contains('full')) setVoiceFull(false); else if (work.isOpen) work.open(false); else app.net && app.net.interrupt();
+    if (app.voiceOn && $('voicePanel').classList.contains('full')) setVoiceFull(false); else if (work.isOpen) work.open(false); else if (files.isOpen && document.querySelector('#fpanel:focus-within')) files.setOpen(false); else app.net && app.net.interrupt();
   }
 });
 

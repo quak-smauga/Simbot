@@ -7,6 +7,48 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-28 — Stop i limit łańcucha z workflow
+
+- **Stop**: przycisk wysyłania zamienia się w Stop, gdy simy myślą/mówią (pole puste). `interrupt` (Stop/Esc) kończy teraz też łańcuch sim→sim; nowa wiadomość usera kończy łańcuch po bieżącej wypowiedzi.
+- **Limit łańcucha z workflow**: `łańcuch: N` / `łańcuch: bez limitu` (bezpiecznik 100), domyślnie 3 (`chainLimitOf()` w `session.ts`, zamiast `MAX_CHAIN`).
+- Nowy event `chain.limit { hops, limit, next, by }` i WS `{ t: "chain.continue" }` — linia „simy wymieniły N wiadomości bez Ciebie · Kontynuuj”.
+- Strony docsów: [Mentions](/contracts/mentions/), [WS](/api/chat-ws/), [Eventy](/events/), [Pojęcia](/overview/concepts/).
+
+## 2026-11-27 — `<msg from to>` w prompcie, sim woła tylko @ na początku zdania
+
+- **Historia pokoju w znacznikach**: wiadomości usera i innych simów idą do modelu jako `<msg from="…" to="…">` zamiast `@nazwa: …`; `to` liczy aplikacja (u usera `meta.to` zapisane przy wiadomości). Nowa opcja `BotRunnerOptions.room`.
+- **Sim woła sima tylko `@nazwa` otwierającą zdanie/linię** (`Mention.opens`); w środku zdania to wzmianka. Wcześniej „napisał @sima” wywoływał Simę.
+- **Cudzysłów nie woła**: `„@sima → @ksiegowy”` maskowane w `maskQuoted()` (core i podgląd chipa w UI).
+- **Głos**: `voiceAddress()` — „Księgowy, …”, „hej Simo, …” woła sima bez @.
+- UI: kolejne zmiany prowadzącego z rzędu zwijają się w jedną linię „@a → @b · prowadzi”.
+- Strony docsów: [Mentions](/contracts/mentions/), [Cykl życia](/architecture/lifecycle/).
+
+## 2026-11-27 — prowadzący rozmowy, @ w kodzie nie woła
+
+- **Prowadzący przyklejony**: `@sim` od usera zmienia prowadzącego (`members[0]`, `Session.setLead()`), kolejne wiadomości bez @ idą do niego. Sim wołający sima go nie zmienia. Dodany przez usera sim od razu prowadzi.
+- WS `{ t: "lead", bot }`; `session.members` niesie `lead` i `prev`; `Targets.defaulted`.
+- **`@` w `kodzie`, bloku ``` i cytacie `>` nie woła** (`maskQuoted()` w `packages/core/src/mentions.ts`, test regresji w selftest). Prompt rozmowy: `@nazwa` tylko, gdy sim ma odpowiedzieć.
+- UI: chip „Odpowiada: @sim” nad polem (podgląd przed wysłaniem, wybór, ×), linie „@sima → @ksiegowy · prowadzi” w wątku, wzmianki w kolorze sima.
+- Strony docsów: [Mentions](/contracts/mentions/), [WS](/api/chat-ws/), [UI](/components/ui/).
+
+## 2026-11-27 — panel plików, @[ścieżka], @sim przejmuje rozmowę
+
+- **Panel plików rozmowy** (`public/ui/files.js`): przełącznik w nagłówku obok ⋮, prawa kolumna (współdzielona z panelem komputera). Folder rozmowy ma teraz **podfoldery**; nazwy plików w API, `meta` i narzędziach to ścieżki względne.
+- REST: `GET /api/sessions/:id/files` zwraca `{ dir, entries[] }` (`?dir=`, `?all=1`) zamiast `{ dir, files[] }`; upload przyjmuje `&dir=`; nowe `POST …/files/mkdir`, `…/move`, `…/delete`; `…/open` przyjmuje `{ path }`. PDF serwowany bez `CSP: sandbox`.
+- **`@[ścieżka]`** w wiadomości usera: plik albo cały folder idzie do tej tury (`meta.scope`, ten sam budżet co załączniki). `files.list` przyjmuje podfolder. Plan z samych lokalnych narzędzi wykonuje się w chat serverze.
+- **@sim spoza rozmowy od usera przejmuje rozmowę**: `resolveTargets({ adopt: true })` → `joined`, `Session.takeOver()` (Sima wychodzi, `session.members` z `joined` i `left`). Przycisk „Dodaj sima” w nagłówku i dialog „obok / zamiast Simy” usunięte.
+- Obrazy zmniejszane do 1568 px (było 1600).
+- Strony docsów: [Pliki rozmowy](/capabilities/files/), [Mentions](/contracts/mentions/), [REST](/api/chat-rest/), [UI](/components/ui/), [Chat](/components/chat/).
+
+## 2026-11-27 — modele lokalne (Ollama) i pliki rozmowy
+
+- **Wybór modeli w UI**: przycisk pod polem wiadomości. Jeden model do wszystkiego, opcjonalnie osobny do narzędzi (podmenu). Dostawcy: Claude i **Ollama** (`packages/core/src/ollama.ts`): status, start serwera, lista modeli z capabilities (`/api/show`: vision, kontekst), pobieranie z postępem.
+- `createLlm()` zwraca `SwitchableLlm` (`caps()`, `select()`, `selection()`); `LlmAdapter.caps?()` mówi, czy model slotu widzi obrazy. Wybór w `settings["llm"]`, nowe endpointy `GET/PUT /api/llm`, `POST /api/llm/ollama/start|pull` (chat) i `GET/POST /api/llm` (agent); agent dostaje wybór też w env `QWE_LLM`. Nowe env: `QWE_OLLAMA_URL`, `QWE_OLLAMA_NUM_CTX`.
+- computer: model narzędzi bez vision → decydent i planner bez zrzutu, tryb desktop zwraca błąd zamiast działać na ślepo.
+- **Pliki rozmowy**: folder `<data>/sessions/<id>/files`, endpointy `/api/sessions/:id/files…`, WS `text` z `files[]`, `Turn.parts` z `Media` (obraz / PDF). Pliki w treści tylko w turze, w której przyszły (budżet tokenów), potem odnośniki. Nowe lokalne narzędzia `files.list`, `files.read`, `files.look`.
+- UI: drop-zone, wklejanie, pasek miniatur nad polem, miniatury w dymku, „Otwórz folder plików” w menu rozmowy.
+- Strony docsów: [Core](/components/core/), [Chat](/components/chat/), [UI](/components/ui/), [Pliki rozmowy](/capabilities/files/), [REST](/api/chat-rest/), [WS](/api/chat-ws/), [Agent API](/api/agent/), [Konfiguracja](/development/configuration/), [Dane](/architecture/data/).
+
 ## 2026-11-24 — computer: status mówi prawdę (faza 2)
 
 Druga powtórka testów: na leafly etap „Filtr ustawiony” zaliczył się sam, bo planner dał mu warunek „adres zawiera /strains”, a raport twierdził, że filtr został użyty. Na xkcd etap „opis odczytany” zaliczył sam adres.

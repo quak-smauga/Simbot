@@ -33,7 +33,7 @@ Potem mirror eventów busa rozmowy (`MIRROR` w `ws.ts`):
 | mowa | `say.start` · `say.text` · `say.end` · `voice.end` |
 | narzędzia | `tool.call` · `tool.result` (bez pełnego tekstu; `found` dla `memory.search`) |
 | user | `user.text` · `user.heard` · `user.level` (max 10/s) · `user.command` |
-| rozmowa | `session.voice` · `session.title` · `session.members` · `session.workflow` · `memory.saved` · `mention.user` · `mention.absent` · `log` |
+| rozmowa | `session.voice` · `session.title` · `session.members` · `session.workflow` · `memory.saved` · `mention.user` · `mention.absent` · `chain.limit` · `log` |
 | z agenta | każdy `AgentEvent` spłaszczony: `{ t: e.type, agent: true, seq, at, taskId, stepId, planId, ...e.data }` |
 
 Payloady eventów busa: `apps/chat/src/events.ts` (`ChatEvents`) i [Eventy](/events/).
@@ -42,12 +42,14 @@ Payloady eventów busa: `apps/chat/src/events.ts` (`ChatEvents`) i [Eventy](/eve
 
 | Wiadomość | Działanie |
 |---|---|
-| `{ t: "text", text }` | wiadomość usera (dispatch `@`) |
+| `{ t: "text", text, files? }` | wiadomość usera (dispatch `@`). `files` = nazwy z folderu rozmowy (najpierw `POST /api/sessions/:id/files`), maks. 50; sam `files` bez tekstu też przechodzi |
 | `{ t: "voice", on }` | włącz / wyłącz głos |
 | `{ t: "played", sayId }` | klient odtworzył kwestię |
-| `{ t: "interrupt" }` | przerwij mowę |
+| `{ t: "interrupt" }` | Stop / Esc: przerwij mowę i myślenie, zakończ łańcuch sim→sim (zadanie komputera trwa) |
+| `{ t: "chain.continue" }` | „Kontynuuj” — wznów łańcuch zatrzymany na limicie (`chain.limit`) |
 | `{ t: "reset" }` | reset rozmowy |
 | `{ t: "member.add", bot }` / `{ t: "member.remove", bot }` | skład rozmowy |
+| `{ t: "lead", bot }` | prowadzący rozmowy (odpowiada na wiadomości bez @) → `session.members` z `lead`, `prev` |
 | `{ t: "workflow", workflowId }` | workflow (`null` = brak) |
 | `{ t: "control", op, taskId? }` | `pause \| resume \| cancel` → odpowiedź `{ t: "control.result", op, … }` |
 | *binarnie* | PCM s16le 16 kHz z mikrofonu |

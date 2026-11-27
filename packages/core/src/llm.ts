@@ -1,12 +1,23 @@
-// LLM — jeden adapter (Anthropic) dla chatu (stream) i executorów capability (json). Tryb mock bez klucza.
+// LLM — adapter dla chatu (stream) i executorów capability (json). Dwóch dostawców: Anthropic i Ollama (lokalnie).
+// Dwa sloty: „chat” (rozmowa) i „tools” (zadania: computer, streszczenia, tytuły, pamięć). Wybór z UI (LlmSelection)
+// przełącza się w locie; bez wyboru — modele z env (QWE_CHAT_MODEL / QWE_EXECUTOR_MODEL), jak dawniej. Tryb mock bez klucza.
 import Anthropic from "@anthropic-ai/sdk";
+import { OllamaClient } from "./ollama.js";
 
 export type Role = "user" | "assistant";
+/** Plik dołączony do tury: obraz albo PDF (bajty). Tekst idzie zwykłym stringiem. */
+export interface Media {
+  kind: "image" | "pdf";
+  data: Buffer;
+  mime: string;
+  name?: string;
+}
 export interface Turn {
   role: Role;
   content: string;
-  /** Opcjonalnie: ta sama treść jako osobne kawałki (sklejone tury) → osobne bloki tekstu w API. Stabilny prefiks dla cache. */
-  parts?: string[];
+  /** Opcjonalnie: ta sama treść jako osobne kawałki (sklejone tury) → osobne bloki w API. Stabilny prefiks dla cache.
+   *  Kawałek może być plikiem (obraz/PDF) — trafia do API jako blok obrazu/dokumentu w tym miejscu. */
+  parts?: (string | Media)[];
 }
 export interface StreamOptions {
   model?: string;
@@ -34,8 +45,33 @@ export interface LlmUsage {
   cacheWrite?: number;
 }
 
+export type LlmProvider = "anthropic" | "ollama";
+export type LlmSlotName = "chat" | "tools";
+/** Model w slocie + to, co potrafi (wypełnia chat server przy zapisie wyboru). */
+export interface LlmSlot {
+  provider: LlmProvider;
+  model: string;
+  vision?: boolean;
+  /** Maks. kontekst modelu (tokeny). */
+  ctx?: number;
+}
+/** Wybór z UI. `tools` puste = ten sam model co rozmowa. */
+export interface LlmSelection {
+  chat: LlmSlot;
+  tools?: LlmSlot | null;
+}
+export interface ModelCaps {
+  provider: LlmProvider;
+  model: string;
+  vision: boolean;
+  ctx?: number;
+  mock: boolean;
+}
+
 export interface LlmAdapter {
   readonly mock: boolean;
+  /** Co potrafi model w danym slocie (np. czy widzi obrazy). Opcjonalne — stare/testowe adaptery go nie mają. */
+  caps?(slot: LlmSlotName): ModelCaps;
   /** Strumień tekstu (chat). Zwraca pełny tekst i stop_reason. */
   stream(system: string, history: Turn[], onDelta: (d: string) => void, opts?: StreamOptions): Promise<{ text: string; stopReason: string | null; usage: LlmUsage }>;
   /** Jedna odpowiedź jako JSON (executor computer itp.). Rzuca, jak nie da się sparsować. */
@@ -49,13 +85,78 @@ export interface LlmConfig {
   mock?: boolean;
   /** Myślenie modelu w rozmowie (domyślnie wyłączone — patrz noThinking). */
   chatThinking?: boolean;
+  ollamaUrl?: string;
+  /** Górny limit num_ctx dla Ollamy. */
+  ollamaNumCtx?: number;
+  /** Wybór z UI (zapisany) — nadpisuje modele z env. */
+  selection?: LlmSelection | null;
 }
 
-export function createLlm(cfg: LlmConfig, mockFns?: Partial<Pick<LlmAdapter, "stream" | "json">>): LlmAdapter {
-  if (cfg.mock || !cfg.apiKey) return mockLlm(mockFns);
-  const client = new Anthropic({ apiKey: cfg.apiKey });
+/** Adapter z przełącznikiem: `select()` zmienia modele w locie (UI → chat server → agent). */
+export interface SwitchableLlm extends LlmAdapter {
+  select(sel: LlmSelection | null): void;
+  selection(): LlmSelection | null;
+  caps(slot: LlmSlotName): ModelCaps;
+  readonly ollama: OllamaClient;
+}
+
+/** Wszystkie modele Claude widzą obrazy i czytają PDF; kontekst 200k. */
+export const ANTHROPIC_MODELS: { id: string; label: string; ctx: number }[] = [
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", ctx: 200_000 },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5", ctx: 200_000 },
+  { id: "claude-opus-5-5", label: "Opus 5.5", ctx: 200_000 },
+  { id: "claude-fable-5-2", label: "Fable 5.2", ctx: 200_000 },
+];
+
+export function createLlm(cfg: LlmConfig, mockFns?: Partial<Pick<LlmAdapter, "stream" | "json">>): SwitchableLlm {
+  const ollama = new OllamaClient(cfg.ollamaUrl, cfg.ollamaNumCtx);
+  const mock = mockLlm(mockFns);
+  const claude = cfg.apiKey && !cfg.mock ? anthropicLlm(cfg, new Anthropic({ apiKey: cfg.apiKey })) : null;
+  let sel: LlmSelection | null = cfg.selection ?? null;
+
+  // slot → kto i jakim modelem. Bez wyboru z UI: env (i caller może podać własny model, np. QWE_PLANNER_MODEL).
+  const slot = (name: LlmSlotName): LlmSlot & { user: boolean } => {
+    const s = name === "tools" ? (sel?.tools ?? sel?.chat) : sel?.chat;
+    if (s) return { ...s, user: true };
+    return { provider: "anthropic", model: name === "chat" ? cfg.chatModel : cfg.executorModel, vision: true, user: false };
+  };
+  const isMock = (s: LlmSlot) => !!cfg.mock || (s.provider === "anthropic" && !claude);
+  const caps = (name: LlmSlotName): ModelCaps => {
+    const s = slot(name);
+    return { provider: s.provider, model: s.model, vision: s.provider === "anthropic" ? true : !!s.vision, ctx: s.ctx, mock: isMock(s) };
+  };
+
   return {
-    mock: false,
+    get mock() {
+      return isMock(slot("chat"));
+    },
+    ollama,
+    caps,
+    select(next) {
+      sel = next && next.chat?.model ? next : null;
+    },
+    selection: () => sel,
+    async stream(system, history, onDelta, opts = {}) {
+      const s = slot("chat");
+      if (isMock(s)) return mock.stream(system, history, onDelta, opts);
+      // wybór z UI wygrywa z modelem podanym przez wołającego (inaczej env z innego dostawcy trafiłby do złego API)
+      const model = s.user ? s.model : (opts.model ?? s.model);
+      if (s.provider === "ollama") return ollama.stream(model, system, history, onDelta, opts);
+      return claude!.stream(system, history, onDelta, { ...opts, model });
+    },
+    async json<T>(system: string, history: Turn[], opts: JsonOptions = {}) {
+      const s = slot("tools");
+      if (isMock(s)) return mock.json<T>(system, history, opts);
+      const model = s.user ? s.model : (opts.model ?? s.model);
+      if (s.provider === "ollama") return ollama.json<T>(model, system, history, { ...opts, image: s.vision ? opts.image : undefined });
+      return claude!.json<T>(system, history, { ...opts, model });
+    },
+  };
+}
+
+/** Anthropic (Messages API): cache promptu, myślenie wyłączone tam, gdzie się da. */
+function anthropicLlm(cfg: LlmConfig, client: Anthropic): Pick<LlmAdapter, "stream" | "json"> {
+  return {
     async stream(system, history, onDelta, opts = {}) {
       let text = "";
       const model = opts.model ?? cfg.chatModel;
@@ -81,13 +182,10 @@ export function createLlm(cfg: LlmConfig, mockFns?: Partial<Pick<LlmAdapter, "st
       return { text, stopReason: final.stop_reason, usage: usageOf(final.usage) };
     },
     async json(system, history, opts = {}) {
-      const messages = history.map((t) => ({ role: t.role, content: t.content as string | Anthropic.ContentBlockParam[] }));
+      const messages = toMessages(history, {});
       if (opts.image && messages.length) {
         const last = messages[messages.length - 1];
-        last.content = [
-          { type: "image", source: { type: "base64", media_type: opts.image.mime, data: opts.image.data.toString("base64") } },
-          { type: "text", text: last.content as string },
-        ];
+        last.content = [mediaBlock({ kind: "image", data: opts.image.data, mime: opts.image.mime }), ...(last.content as Anthropic.ContentBlockParam[])];
       }
       const model = opts.model ?? cfg.executorModel;
       const quiet = noThinking(model);
@@ -128,15 +226,21 @@ function usageOf(u: Anthropic.Usage | undefined): LlmUsage {
   return { input: u?.input_tokens ?? 0, output: u?.output_tokens ?? 0, cacheRead: u?.cache_read_input_tokens ?? 0, cacheWrite: u?.cache_creation_input_tokens ?? 0 };
 }
 
-/** Historia → wiadomości API: kawałki jako osobne bloki, cache_control na ostatnim bloku historii, `tail` za nim. */
+/** Plik → blok API: obraz (base64) albo dokument PDF. */
+function mediaBlock(m: Media): Anthropic.ContentBlockParam {
+  if (m.kind === "pdf") return { type: "document", source: { type: "base64", media_type: "application/pdf", data: m.data.toString("base64") }, ...(m.name ? { title: m.name } : {}) };
+  return { type: "image", source: { type: "base64", media_type: m.mime as "image/png", data: m.data.toString("base64") } };
+}
+
+/** Historia → wiadomości API: kawałki jako osobne bloki (pliki jako obraz/dokument), cache_control na ostatnim bloku historii, `tail` za nim. */
 export function toMessages(history: Turn[], opts: StreamOptions): Anthropic.MessageParam[] {
   const msgs: Anthropic.MessageParam[] = history.map((t) => {
-    const parts = (t.parts?.length ? t.parts : [t.content]).filter((p) => p.trim());
-    return { role: t.role, content: parts.map((text) => ({ type: "text" as const, text })) };
+    const parts = (t.parts?.length ? t.parts : [t.content]).filter((p) => typeof p !== "string" || p.trim());
+    return { role: t.role, content: parts.map((p) => (typeof p === "string" ? { type: "text" as const, text: p } : mediaBlock(p))) };
   });
   const last = msgs[msgs.length - 1];
   if (opts.cacheHistory && last && Array.isArray(last.content) && last.content.length) {
-    const blocks = last.content as Anthropic.TextBlockParam[];
+    const blocks = last.content as (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[];
     blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], cache_control: { type: "ephemeral" } };
   }
   if (opts.tail) {
@@ -185,9 +289,8 @@ export function extractJson<T = unknown>(raw: string): T {
  * --mock: skrypt bez API. Każde pytanie z "?" / "szukaj" / "sprawdź" → web.query; "wejdź"/"otwórz"/"komputer" → computer.run;
  * "plan"/"i potem" → plan (search → computer). Po <nativeresult> → podsumowuje. Delty słowo po słowie, żeby TTS/UI dostały strumień.
  */
-function mockLlm(over: Partial<Pick<LlmAdapter, "stream" | "json">> = {}): LlmAdapter {
+function mockLlm(over: Partial<Pick<LlmAdapter, "stream" | "json">> = {}): Pick<LlmAdapter, "stream" | "json"> {
   return {
-    mock: true,
     stream:
       over.stream ??
       (async (_system, history, onDelta) => {

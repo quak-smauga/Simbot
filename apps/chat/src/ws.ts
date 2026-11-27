@@ -13,7 +13,7 @@ const MIRROR = new Set<keyof ChatEvents>([
   "say.start", "say.text", "say.end", "voice.end",
   "tool.call", "tool.result",
   "user.text", "user.heard", "user.level", "user.command",
-  "assistant.message", "session.voice", "session.title", "session.members", "session.workflow", "memory.saved", "log", "mention.absent",
+  "assistant.message", "session.voice", "session.title", "session.members", "session.workflow", "memory.saved", "log", "mention.absent", "chain.limit",
 ]);
 
 /** [u8 magic=1][u32 seq][u32 sampleRate][u8 idLen][id][pcm] */
@@ -102,7 +102,7 @@ export function attachWs(wss: WebSocketServer, hub: SessionHub) {
         session.pushAudio(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
         return;
       }
-      let msg: { t?: string; text?: string; on?: boolean; sayId?: string; op?: "pause" | "resume" | "cancel"; taskId?: string; bot?: string; workflowId?: string | null };
+      let msg: { t?: string; text?: string; files?: string[]; on?: boolean; sayId?: string; op?: "pause" | "resume" | "cancel"; taskId?: string; bot?: string; workflowId?: string | null };
       try {
         msg = JSON.parse(data.toString());
       } catch {
@@ -110,9 +110,11 @@ export function attachWs(wss: WebSocketServer, hub: SessionHub) {
       }
       try {
         switch (msg.t) {
-          case "text":
-            if (msg.text?.trim()) session.sendText(msg.text.trim());
+          case "text": {
+            const files = Array.isArray(msg.files) ? msg.files.filter((f) => typeof f === "string").slice(0, 50) : [];
+            if (msg.text?.trim() || files.length) session.sendText((msg.text ?? "").trim(), files);
             break;
+          }
           case "voice":
             bus.emit("session.voice", { on: !!msg.on });
             break;
@@ -127,6 +129,12 @@ export function attachWs(wss: WebSocketServer, hub: SessionHub) {
             break;
           case "member.add":
             if (msg.bot) session.addMember(msg.bot);
+            break;
+          case "lead":
+            if (msg.bot) session.setLead(msg.bot);
+            break;
+          case "chain.continue":
+            session.continueChain();
             break;
           case "member.remove":
             if (msg.bot) session.removeMember(msg.bot);

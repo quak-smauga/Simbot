@@ -7,12 +7,22 @@ export const clock = iso => new Date(iso).toLocaleTimeString('pl-PL', { hour: '2
 export const splitTitle = t => { const m = /^(\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic})*)\s+(.*)$/u.exec(t || ''); return m ? { emoji: m[1], text: m[2] } : { emoji: '', text: t || '' }; };
 export const wait = ms => new Promise(r => setTimeout(r, ms));
 
-/** @nazwa / @nazwa.akcja → <span class="mention"> (user → mention--me). Działa na tekście już po esc(). */
+/** @nazwa / @nazwa.akcja → <span class="mention"> (user → mention--me); @[ścieżka] → chip pliku (klik = panel plików).
+ *  Działa na tekście już po esc(). */
+let mentionColor = () => '';
+/** Kolor sima dla pigułek @nazwa (ustawia app.js — wie, jak wyglądają simy). */
+export const setMentionColor = fn => { mentionColor = fn; };
 export function mentions(html, { user, known } = {}) {
+  html = html.replace(/@\[([^\]\n]{1,300})\]/g, (m, path) => {
+    const name = path.replace(/\/+$/, '').split('/').pop();
+    const dir = !/\.[a-z0-9]{1,6}$/i.test(name);
+    return `<button type="button" class="mention mention--file" data-fpath="${path}" title="${path}"><svg class="ic" width="13" height="13" viewBox="0 0 24 24">${dir ? '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' : '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'}</svg>${name}</button>`;
+  });
   return html.replace(/(^|[^\p{L}\p{N}_@])@([a-z0-9][a-z0-9-]*)(\.[a-z]+)?/giu, (m, pre, name, act) => {
     const n = name.toLowerCase();
     if (known && !known.includes(n) && n !== user) return m;
-    return `${pre}<span class="mention${n === user ? ' mention--me' : ''}">@${name}${act ? `<span class="mention--act">${act}</span>` : ''}</span>`;
+    const c = n === user ? '' : mentionColor(n);
+    return `${pre}<span class="mention${n === user ? ' mention--me' : ''}${c ? ' mention--sim' : ''}"${c ? ` style="--mc:${c}"` : ''}>@${name}${act ? `<span class="mention--act">${act}</span>` : ''}</span>`;
   });
 }
 

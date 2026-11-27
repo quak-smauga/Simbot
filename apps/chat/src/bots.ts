@@ -27,6 +27,7 @@ import {
 } from "@qwe/core";
 import { readFileSync } from "node:fs";
 import { MEMORY_SEARCH_USAGE } from "./recall.js";
+import { FILES_USAGE } from "./files.js";
 import { resolve } from "node:path";
 
 const MAX_HOPS = 3;
@@ -73,7 +74,7 @@ export function memoryPrompt(bot: string, who: string, mem: MemoryView): string 
 export function buildSystemPrompt(spec: AgentSpec, user: UserProfile, mcp = ""): string {
   const tpl = readFileSync(resolve(import.meta.dirname, "..", "prompts", "system.md"), "utf8");
   // + narzędzia chat servera, które ma każdy sim (pamięć poprzednich rozmów) + serwery MCP tego sima (z katalogu na dysku)
-  const tools = [toolsPrompt(spec.capabilities.map((c) => c.descriptor)), `- ${MEMORY_SEARCH_USAGE.usage}\n  ${MEMORY_SEARCH_USAGE.notes}`, mcp ? `\n${mcp}` : ""].filter(Boolean).join("\n");
+  const tools = [toolsPrompt(spec.capabilities.map((c) => c.descriptor)), `- ${MEMORY_SEARCH_USAGE.usage}\n  ${MEMORY_SEARCH_USAGE.notes}`, `- ${FILES_USAGE.usage}\n  ${FILES_USAGE.notes}`, mcp ? `\n${mcp}` : ""].filter(Boolean).join("\n");
   const skills = spec.skills.length
     ? "## Umiejętności (jak podchodzić do zadań)\n" + spec.skills.map((s) => `### ${s.name}${s.description ? ` — ${s.description}` : ""}\n${s.body}`).join("\n\n")
     : "";
@@ -100,7 +101,7 @@ export function conversationPrompt(o: { bot: string; members: { name: string; de
     `Jesteś @${o.bot}. Rozmawiasz z ${o.user.name || "użytkownikiem"} (@${o.user.slug}).` +
       (others.length ? ` W rozmowie są też inne simy: ${others.map((m) => `@${m.name}${m.description ? ` (${m.description})` : ""}`).join(", ")}.` : " Jesteś jedynym simem w tej rozmowie."),
     others.length
-      ? `Wiadomości innych simów widzisz jako „@nazwa: …”. Żeby przekazać coś innemu simowi, napisz @nazwa w swojej wypowiedzi — odpowie po Tobie. Nie powtarzaj cudzej roboty, nie odpowiadaj za innych. Jak user zwrócił się do kogoś innego, a nie do Ciebie — nie wtrącasz się.`
+      ? `Wiadomości w tej rozmowie widzisz jako <msg from="kto" to="kogo wołał">…</msg>. Atrybut to ustala aplikacja: u usera to simy, które mają odpowiedzieć (zawołani przez @ albo prowadzący, gdy @ nie było), u sima — kogo zawołał. To jest jedyne źródło prawdy, do kogo mówiono; @ w kodzie, cytacie czy cudzysłowie nikogo nie woła. Sam piszesz zwykły tekst, bez znaczników <msg>. Żeby zawołać innego sima (odpowie zaraz po Tobie), ZACZNIJ zdanie albo linię od @nazwa: „@ksiegowy, sprawdź sumy.” — rób to tylko wtedy, gdy naprawdę ma teraz coś zrobić albo odpowiedzieć. @nazwa w środku zdania to tylko wzmianka i nikogo nie woła; gdy o kimś mówisz, najlepiej pisz nazwę bez @ („księgowy się tym zajmie”). Nie powtarzaj cudzej roboty, nie odpowiadaj za innych. Jak user zwrócił się do kogoś innego, a nie do Ciebie — nie wtrącasz się.`
       : "",
     `Żeby zawołać ${o.user.name || "usera"} (np. potrzebujesz potwierdzenia albo decyzji), napisz @${o.user.slug} w wypowiedzi — dostanie powiadomienie.`,
   ];

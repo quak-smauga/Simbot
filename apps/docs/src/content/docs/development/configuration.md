@@ -26,6 +26,10 @@ Lista poniżej powstała z przeszukania kodu (`apps/*/src`, `packages/*/src`, `p
 | `QWE_CHAT_THINKING` | `0` | `1` = model myśli przed odpowiedzią (+4000 tokenów) |
 | `QWE_PLANNER_MODEL` | = executor | model plannera computera |
 | `QWE_EXECUTOR_DESKTOP_MODEL` | = executor | model decydenta w trybie desktop |
+| `QWE_OLLAMA_URL` | `http://127.0.0.1:11434` | serwer Ollamy (modele lokalne) |
+| `QWE_OLLAMA_NUM_CTX` | `16384` | górny limit kontekstu (`num_ctx`) dla modeli Ollamy — więcej = więcej RAM |
+
+Model wybrany w UI (przycisk pod polem wiadomości, zapis w `settings` pod kluczem `llm`) nadpisuje `QWE_CHAT_MODEL` / `QWE_EXECUTOR_MODEL` i modele z env podawane przez computer (`QWE_PLANNER_MODEL`, `QWE_EXECUTOR_DESKTOP_MODEL`). Pusty wybór (`PUT /api/llm` bez `chat`) = powrót do env. Agent dostaje wybór w `QWE_LLM` (JSON) przy spawnie i przez `POST /api/llm`.
 
 ## Głos (ElevenLabs)
 

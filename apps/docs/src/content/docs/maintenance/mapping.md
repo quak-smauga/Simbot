@@ -13,7 +13,7 @@ sidebar:
 | `packages/core/src/manifest.ts` | [AgentManifest.yaml](/contracts/agent-manifest/), [Dane](/architecture/data/) |
 | `packages/core/src/mentions.ts` | [Mentions](/contracts/mentions/) |
 | `packages/core/src/text.ts` | [@qwe/core → command router](/components/core/#command-router) |
-| `packages/core/src/llm.ts`, `env.ts`, `http.ts` | [@qwe/core](/components/core/), [Konfiguracja](/development/configuration/) |
+| `packages/core/src/llm.ts`, `ollama.ts`, `env.ts`, `http.ts` | [@qwe/core](/components/core/), [Konfiguracja](/development/configuration/) |
 | `packages/core/src/mcp.ts`, `packages/mcp/src/*`, `apps/chat/src/mcp.ts`, `apps/chat/public/ui/mcp.js` | [Serwery MCP](/capabilities/mcp/), [Chat REST → MCP](/api/chat-rest/#serwery-mcp), [Agent API → MCP](/api/agent/#serwery-mcp) |
 | `packages/voice/src/*` | [@qwe/voice](/components/voice/) |
 | `packages/cli/src/*` | [CLI](/components/cli/), [Docker](/development/docker/) |
@@ -23,6 +23,8 @@ sidebar:
 | `apps/chat/src/bots.ts` | [Chat server → prompt](/components/chat/#prompt-systemowy-sima), [Pamięć](/capabilities/memory/) |
 | `apps/chat/src/store.ts`, `context.ts` | [Dane i pamięć](/architecture/data/) |
 | `apps/chat/src/recall.ts` | [Pamięć i memory.search](/capabilities/memory/) |
+| `apps/chat/src/files.ts`, `public/ui/attach.js`, `public/ui/files.js` | [Pliki rozmowy](/capabilities/files/), [REST](/api/chat-rest/), [UI](/components/ui/) |
+| `apps/chat/src/models.ts`, `public/ui/models.js` | [REST](/api/chat-rest/), [UI](/components/ui/), [Konfiguracja](/development/configuration/) |
 | `apps/chat/src/agent-link.ts` | [Procesy i komunikacja](/architecture/system/) |
 | `apps/chat/prompts/system.md` | [nativeapi → prompt systemowy](/contracts/nativeapi/#prompt-systemowy) |
 | `apps/chat/public/ui/*` | [UI](/components/ui/), [Desktop → widget](/components/desktop/#widget) |

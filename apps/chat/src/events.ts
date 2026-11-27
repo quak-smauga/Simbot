@@ -13,7 +13,7 @@ export interface ChatEvents extends VoiceEvents {
   "user.utterance": { pcm: Buffer; sampleRate: number; durationMs: number };
   /** VAD zamknął wypowiedź — UI mruga, zanim przyjdzie transkrypcja. */
   "user.heard": { durationMs: number };
-  "user.text": { text: string; source: "stt" | "typed"; messageId?: string; author: string };
+  "user.text": { text: string; source: "stt" | "typed"; messageId?: string; author: string; files?: string[] };
   "user.level": { rms: number; speaking: boolean };
   "user.interrupt": {};
   "user.command": { command: string; text: string };
@@ -25,6 +25,8 @@ export interface ChatEvents extends VoiceEvents {
   "bot.turn": { bot: string; action: MentionAction; by: string; joined?: boolean };
   /** User wspomniał simy, których nie ma w rozmowie — nie odpowiadają; UI proponuje „dodaj”. */
   "mention.absent": { names: string[] };
+  /** łańcuch sim→sim stanął na limicie (workflow: „łańcuch: N”); `next` czeka na „Kontynuuj” (WS `chain.continue`) */
+  "chain.limit": { hops: number; limit: number; next: string[]; by: string };
   "agent.thinking": { turn: number; bot: string };
   "agent.error": { message: string; bot?: string };
   "assistant.message": { messageId: string; text: string; bot: string };
@@ -44,7 +46,7 @@ export interface ChatEvents extends VoiceEvents {
   "session.title": { title: string; emoji?: string; pending?: boolean };
   "session.reset": {};
   /** Skład rozmowy się zmienił (ktoś dołączył przez @, dodany ręcznie, usunięty). */
-  "session.members": { members: string[]; joined?: string; left?: string; /** kto dodał: slug usera albo nazwa sima (@ w łańcuchu) */ by?: string };
+  "session.members": { members: string[]; joined?: string; left?: string; /** kto dodał: slug usera albo nazwa sima (@ w łańcuchu) */ by?: string; /** nowy prowadzący (members[0]) i poprzedni */ lead?: string; prev?: string };
   /** Workflow rozmowy zmieniony. */
   "session.workflow": { workflowId: string | null; name?: string };
   /** Pamięć sima po turze (async): co doszło / co wyleciało. */

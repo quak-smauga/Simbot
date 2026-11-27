@@ -54,7 +54,7 @@ sequenceDiagram
 - `@user` → event `mention.user` (toast / powiadomienie), nikt nie odpowiada;
 - `@sim` spoza rozmowy → `mention.absent`, UI proponuje „dodaj”.
 
-Każdy sim może w odpowiedzi zawołać następnego (`@audytor sprawdź sumy`). Łańcuch ma limit **3 ogniw** po wiadomości usera (`MAX_CHAIN`).
+Każdy sim może w odpowiedzi zawołać następnego (`@audytor sprawdź sumy`). Łańcuch ma domyślnie limit **3 przekazań** po wiadomości usera; workflow może go zmienić (`łańcuch: N` / `bez limitu`), na limicie UI pokazuje **Kontynuuj**. Stop/Esc i nowa wiadomość usera kończą łańcuch — zob. [Mentions](/contracts/mentions/#łańcuch-sim--sim).
 
 :::note[Podczas pracy komputera]
 Kiedy rozmowa jest w stanie `working` (computer task), wypowiedzi głosowe **nie idą do LLM** — trafiają do command routera (`matchVoiceCommand`): „zatrzymaj komputer”, „wznów”, „anuluj zadanie”, „przejmuję kontrolę”. Zob. [Komendy głosowe](/components/core/#command-router).
@@ -68,7 +68,7 @@ Kiedy rozmowa jest w stanie `working` (computer task), wypowiedzi głosowe **nie
 |---|---|
 | wiadomość usera | `user` |
 | moja odpowiedź | `assistant` (pełny tekst z blokiem) |
-| odpowiedź innego sima | `user`, jako `@nazwa: tekst` (bez bloków) |
+| odpowiedź innego sima | `user`, jako `<msg from="nazwa" to="…">tekst</msg>` (bez bloków); w pokoju z kilkoma simami tak samo wiadomość usera |
 | mój wynik narzędzia | `user` (`<nativeresult>`) — w całości tylko w bieżącej turze, starsze skrócone |
 | cudzy wynik narzędzia | pominięty |
 

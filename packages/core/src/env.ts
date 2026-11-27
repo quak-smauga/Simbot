@@ -37,6 +37,8 @@ export function commonConfig() {
     executorModel: env("QWE_EXECUTOR_MODEL", "claude-haiku-5-5"),
     chatMaxTokens: envNum("QWE_CHAT_MAX_TOKENS", 1200),
     chatThinking: envBool("QWE_CHAT_THINKING", false),
+    ollamaUrl: env("QWE_OLLAMA_URL", "http://127.0.0.1:11434"),
+    ollamaNumCtx: envNum("QWE_OLLAMA_NUM_CTX", 16384),
     host: env("QWE_HOST", "127.0.0.1"),
     chatPort: envNum("QWE_CHAT_PORT", 3100),
     agentPort: envNum("QWE_AGENT_PORT", 7777),

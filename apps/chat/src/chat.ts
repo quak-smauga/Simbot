@@ -9,13 +9,14 @@
 //   tool (cudze)       → pomijam
 // Na początku: streszczenie starszej części rozmowy (jeśli jest). Sąsiednie tury tej samej roli sklejam, ale każdy kawałek
 // zostaje osobnym blokiem (Turn.parts) — dzięki temu początek historii jest bajt w bajt taki sam co turę i łapie się w cache.
-import { CLOSE_TAG, ToolStreamParser, escapeXml, nativeResult, newId, withClosedTag, type LlmAdapter, type MentionAction, type NativeBlock, type NativeCall, type Turn, MENTION_ACTIONS } from "@qwe/core";
+import { CLOSE_TAG, ToolStreamParser, escapeXml, nativeResult, newId, withClosedTag, type LlmAdapter, type Media, type MentionAction, type ModelCaps, type NativeBlock, type NativeCall, type Turn, MENTION_ACTIONS, parseMentions } from "@qwe/core";
+import { fileParts, filesBudget } from "./files.js";
 import type { AgentLink } from "./agent-link.js";
 import type { ChatBus } from "./events.js";
 import { CONTEXT, compactToolResult } from "./context.js";
 import type { FoundConversation } from "./recall.js";
 
-type LocalResult = { text: string; found?: FoundConversation[] };
+type LocalResult = { text: string; found?: FoundConversation[]; files?: string[] };
 import type { MessageRow, Store } from "./store.js";
 
 const MAX_HOPS = 3;
@@ -34,7 +35,14 @@ export interface BotRunnerOptions {
   /** ElevenLabs voiceId sima (puste = domyślny). */
   voice: () => string;
   maxTokens: number;
-  /** Narzędzia wykonywane w chat serverze (memory.search). Zwraca <nativeresult> albo null, gdy to nie lokalne narzędzie. */
+  /** Folder plików rozmowy + co potrafi model rozmowy (pliki w kontekście: obraz/PDF/tekst albo odnośnik). */
+  filesDir?: string;
+  /** Czy narzędzie jest lokalne (wtedy także plan z samych takich kroków wykonuje się tutaj). */
+  isLocal?: (name: string) => boolean;
+  caps?: () => ModelCaps;
+  /** Simy w pokoju, gdy jest ich więcej niż jeden (wtedy historia idzie w <msg from to>); null = rozmowa 1:1. */
+  room?: () => string[] | null;
+  /** Narzędzia wykonywane w chat serverze (memory.search, files.*). Zwraca <nativeresult> albo null, gdy to nie lokalne narzędzie. */
   local?: (call: NativeCall) => Promise<LocalResult | null> | LocalResult | null;
   /** Po skończonej turze (ostatnia odpowiedź bez bloku): wymiana user→…→sim do pamięci. */
   onTurnDone?: (exchange: Turn[]) => void;
@@ -77,24 +85,46 @@ export class BotRunner {
     for (let i = rows.length - 1; i >= 0; i--) if (rows[i].role === "user") { lastUser = i; break; }
 
     const turns: Turn[] = [];
-    const push = (role: Turn["role"], text: string) => {
-      if (!text) return;
+    const push = (role: Turn["role"], text: string, media: (string | Media)[] = []) => {
+      const parts = [...media, ...(text ? [text] : [])];
+      if (!parts.length) return;
+      const plain = parts.filter((p): p is string => typeof p === "string").join("\n\n");
       const last = turns[turns.length - 1];
       if (last && last.role === role) {
-        last.content += "\n\n" + text;
-        last.parts!.push(text);
-      } else turns.push({ role, content: text, parts: [text] });
+        last.content += "\n\n" + plain;
+        last.parts!.push(...parts);
+      } else turns.push({ role, content: plain, parts });
+    };
+    // pliki: w bieżącej turze w treści (w budżecie), wcześniej — odnośniki (patrz files.ts)
+    const caps = this.o.caps?.();
+    // @[ścieżka] (meta.scope): w bieżącej turze pliki jak załączniki (ten sam budżet), wcześniej — jedna linijka
+    const files = (m: MessageRow, inline: boolean) => {
+      const meta = metaOf(m);
+      const names = meta.files ?? [];
+      const scope = meta.scope;
+      if ((!names.length && !scope?.refs.length) || !this.o.filesDir || !caps) return [];
+      const out: (string | Media)[] = [];
+      if (scope?.refs.length) {
+        const what = scope.refs.map((r) => `@[${r.path}] (${r.type === "dir" ? `folder, ${r.count} pl.` : "plik"})`).join(", ");
+        out.push(inline ? `[user wskazał: ${what} — treść poniżej, w miarę budżetu]` : `[user wskazał wtedy: ${what}; zajrzyj przez files.list / files.read / files.look]`);
+      }
+      const all = inline ? [...names, ...(scope?.files ?? []).filter((f) => !names.includes(f))] : names;
+      if (all.length) out.push(...fileParts(this.o.filesDir, all, caps, inline, filesBudget(caps)));
+      return out;
     };
     if (summary) push("user", `<streszczenie_rozmowy>\nTo notatki ze starszej części tej rozmowy (pełne wiadomości już nie mieszczą się w kontekście). Traktuj je jak to, co pamiętasz z wcześniej.\n\n${summary}\n</streszczenie_rozmowy>`);
+    // w pokoju z kilkoma simami cudze wiadomości idą w <msg from to>: kto mówi i kogo naprawdę zawołał (routing aplikacji,
+    // nie zgadywanie po gołym @). Jeden sim + user → zwykły tekst usera, jak dawniej.
+    const room = this.o.room?.() ?? null;
     rows.forEach((m, i) => {
-      if (m.role === "user") push("user", m.content);
+      if (m.role === "user") push("user", room ? msgTag(m.author, metaOf(m).to ?? callsIn(m.content, room, m.author), m.content) : m.content, files(m, i === lastUser));
       else if (m.role === "assistant") {
         if (m.author === me) push("assistant", m.content);
         else {
           const spoken = metaOf(m).spoken ?? m.content.replace(/<nativeapi>[\s\S]*$/, "").trim();
-          if (spoken) push("user", `@${m.author}: ${spoken}`);
+          if (spoken) push("user", msgTag(m.author, callsIn(spoken, room ?? [], m.author), spoken));
         }
-      } else if (m.role === "tool" && m.author === me) push("user", i > lastUser ? m.content : compactToolResult(m.content));
+      } else if (m.role === "tool" && m.author === me) push("user", i > lastUser ? m.content : compactToolResult(m.content), i > lastUser ? files(m, true) : []);
     });
     while (turns.length && turns[0].role !== "user") turns.shift();
     return turns;
@@ -131,7 +161,8 @@ export class BotRunner {
           this.pushTool("(limit narzędzi w tej turze — odpowiedz z tym, co masz)");
           continue;
         }
-        this.pushTool(await this.runBlock(r.block, signal));
+        const res = await this.runBlock(r.block, signal);
+        this.pushTool(res.text, res.files);
         bus.emit("agent.state", { state: "thinking", bot });
       }
       return last;
@@ -140,8 +171,9 @@ export class BotRunner {
     }
   }
 
-  private pushTool(text: string) {
-    this.o.store.addMessage(this.o.sessionId, "tool", this.o.bot, text);
+  /** Wynik narzędzia do historii. `files` = pliki, które model ma zobaczyć w następnym kroku (files.look). */
+  private pushTool(text: string, files?: string[]) {
+    this.o.store.addMessage(this.o.sessionId, "tool", this.o.bot, text, files?.length ? { files } : undefined);
   }
 
   private async streamOnce(signal: AbortSignal, systemExtra: string, tail: string): Promise<{ block: NativeBlock | null; text: string }> {
@@ -185,7 +217,7 @@ export class BotRunner {
   }
 
   /** Blok → task w agent serverze (jako ten sim) → tekst <nativeresult> dla modelu. */
-  private async runBlock(block: NativeBlock, signal: AbortSignal): Promise<string> {
+  private async runBlock(block: NativeBlock, signal: AbortSignal): Promise<{ text: string; files?: string[] }> {
     const { bus, link, bot } = this.o;
     const callId = newId("call");
     const t0 = Date.now();
@@ -193,15 +225,25 @@ export class BotRunner {
     bus.emit("tool.call", { callId, block, bot });
     let text: string;
     let ok = false;
-    // lokalne narzędzia (memory.search) — bez agent servera
+    // plan z samych lokalnych narzędzi (np. kilka files.read) — kroki po kolei tutaj, agent server ich nie zna
+    if (block.kind === "plan" && this.o.local && this.o.isLocal && block.steps.length && block.steps.every((s) => this.o.isLocal!(s.name))) {
+      const rs: LocalResult[] = [];
+      for (const st of block.steps) rs.push((await this.o.local(st)) ?? { text: nativeResult(st.name, "nie wykonano", { ok: "false" }) });
+      text = nativeResult("plan", rs.map((r, i) => `<step id="${block.steps[i].id}" name="${block.steps[i].name}" status="completed">\n${r.text}\n</step>`).join("\n\n"), { ok: "true" });
+      const files = rs.flatMap((r) => r.files ?? []);
+      bus.emit("tool.result", { callId, ok: true, ms: Date.now() - t0, text, bot, found: rs.flatMap((r) => r.found ?? []) });
+      return { text, files };
+    }
+    // lokalne narzędzia (memory.search, files.*) — bez agent servera
     if (block.kind === "direct" && this.o.local) {
       const local = await Promise.all(block.calls.map((c) => this.o.local!(c)));
       if (local.every((x) => x !== null)) {
         const rs = local as LocalResult[];
         text = rs.map((r) => r.text).join("\n\n");
         const found = rs.flatMap((r) => r.found ?? []);
+        const files = rs.flatMap((r) => r.files ?? []);
         bus.emit("tool.result", { callId, ok: true, ms: Date.now() - t0, text, bot, found });
-        return text;
+        return { text, files };
       }
     }
     try {
@@ -222,13 +264,23 @@ export class BotRunner {
       text = nativeResult("task", `Błąd: ${escapeXml((e as Error).message)}`);
     }
     bus.emit("tool.result", { callId, taskId: this.activeTaskId ?? undefined, ok, ms: Date.now() - t0, text, bot });
-    return text;
+    return { text };
   }
 }
 
-const metaOf = (m: MessageRow): { spoken?: string } => {
+/** Wiadomość w historii pokoju: `<msg from="ksiegowy" to="sima">…</msg>`; `to` = kto został zawołany (pusto = nikt). */
+export function msgTag(from: string, to: string[], body: string): string {
+  return `<msg from="${from}"${to.length ? ` to="${to.join(" ")}"` : ""}>\n${body.replace(/<\/msg>/g, "<\\/msg>")}\n</msg>`;
+}
+/** Kogo wiadomość woła — te same reguły co routing (bez kodu, cytatów, cudzysłowów), tylko simy z pokoju. */
+function callsIn(text: string, room: string[], from: string): string[] {
+  return [...new Set(parseMentions(text).map((m) => m.name))].filter((n) => n !== from && room.includes(n));
+}
+
+type Meta = { to?: string[]; spoken?: string; files?: string[]; scope?: { refs: { path: string; type: "dir" | "file"; count: number }[]; files: string[] } };
+const metaOf = (m: MessageRow): Meta => {
   try {
-    return m.meta ? (JSON.parse(m.meta) as { spoken?: string }) : {};
+    return m.meta ? (JSON.parse(m.meta) as Meta) : {};
   } catch {
     return {};
   }

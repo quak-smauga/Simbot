@@ -11,35 +11,47 @@
 //   PATCH  /api/sessions/:id          { title?, bots?, workflowId? }
 //   DELETE /api/sessions/:id
 //   POST   /api/sessions/:id/control  { op: pause|resume|cancel, taskId? }
+//   GET    /api/sessions/:id/files?dir=…   folder rozmowy: zawartość folderu (?all=1 — wszystko, rekurencyjnie)
+//   POST   /api/sessions/:id/files?name=…&dir=…   (surowe bajty) dodaje · GET …/files/:path serwuje (ścieżka zakodowana)
+//   POST   /api/sessions/:id/files/{mkdir,move,delete,open}   panel plików: nowy folder, zmiana nazwy / przeniesienie,
+//          usunięcie, „Pokaż w Finderze” (tylko z naszego UI)
 //   GET    /api/mcp · PUT/DELETE /api/mcp/:name · POST /api/mcp/:name/reconnect   serwery MCP (tylko z naszego UI)
+//   GET/PUT /api/llm · POST /api/llm/ollama/start|pull   wybór modeli (rozmowa / zadania), Ollama: status, modele, pobieranie
 //   GET    /api/agent/status          czy agent żyje
 //   GET    /api/screenshots/:id       proxy do agenta (UI nie musi znać jego adresu)
 //   WS     /ws?session=<id>|lobby
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { WebSocketServer } from "ws";
-import { Router, commonConfig, createLlm, json, readJson, serveStatic, userSlug, type AvatarConfig } from "@qwe/core";
+import { Router, commonConfig, createLlm, json, readJson, serveStatic, userSlug, type AvatarConfig, type LlmSelection, type Req } from "@qwe/core";
 import { voiceConfigFromEnv } from "@qwe/voice";
 import { BotRegistry, DEFAULT_USER, SIMA, botView, type UserProfile } from "./bots.js";
 import { SessionHub } from "./hub.js";
 import { Store } from "./store.js";
 import { attachWs } from "./ws.js";
 import { registerMcpRoutes } from "./mcp.js";
+import { LLM_SETTING, registerModelRoutes } from "./models.js";
+import { absPath, filesDir, listAll, listDir, makeDir, mimeOf, movePath, readFile, removeDir, removePaths, saveFile } from "./files.js";
+import { fromOwnUi } from "./mcp.js";
+import { spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 const cfg = commonConfig();
 const DEV = import.meta.url.endsWith(".ts");
 const PUBLIC = resolve(import.meta.dirname, "..", "public");
 const log = (level: "info" | "warn" | "error", message: string) => console[level === "error" ? "error" : level === "warn" ? "warn" : "log"](message);
 
-const llm = createLlm({ apiKey: cfg.anthropicKey, chatModel: cfg.chatModel, executorModel: cfg.executorModel, mock: cfg.mock, chatThinking: cfg.chatThinking });
+const store = new Store(cfg.dataDir);
+// wybór modeli z UI (settings "llm") nadpisuje env; agent dostaje go przy starcie i po każdej zmianie
+const llm = createLlm({ apiKey: cfg.anthropicKey, chatModel: cfg.chatModel, executorModel: cfg.executorModel, mock: cfg.mock, chatThinking: cfg.chatThinking, ollamaUrl: cfg.ollamaUrl, ollamaNumCtx: cfg.ollamaNumCtx, selection: store.getSetting<LlmSelection | null>(LLM_SETTING, null) });
 const bots = new BotRegistry(cfg.agentsDir, cfg.defaultAgent, llm);
 const voiceCfg = voiceConfigFromEnv(process.env, cfg.mock);
-const store = new Store(cfg.dataDir);
 bots.setUser(store.getSetting<UserProfile>("me", DEFAULT_USER));
 // wspólna pamięć o userze (dla wszystkich simów) — w settings
 bots.setUserMemoryStore({ get: () => store.getSetting<string[]>("me.memory", []), set: (lines) => store.setSetting("me.memory", lines) });
 bots.setDataDir(cfg.dataDir);
-const hub = new SessionHub(store, llm, voiceCfg, bots, cfg.chatMaxTokens, cfg.mock, { url: cfg.agentUrl, mode: cfg.agentMode, port: cfg.agentPort, host: cfg.host, mock: cfg.mock, dev: DEV, log });
+const hub = new SessionHub(store, llm, voiceCfg, bots, cfg.chatMaxTokens, cfg.mock, { url: cfg.agentUrl, mode: cfg.agentMode, port: cfg.agentPort, host: cfg.host, mock: cfg.mock, dev: DEV, log, llm: () => llm.selection() }, cfg.dataDir);
 
 const r = new Router();
 const bad = (res: Parameters<typeof json>[0], e: unknown, code = 400) => json(res, { error: (e as Error).message }, code);
@@ -48,7 +60,7 @@ const me = () => bots.getUser();
 r.get("/api/config", (_q, res) =>
   json(res, {
     mock: cfg.mock,
-    llm: llm.mock ? "mock" : cfg.chatModel,
+    llm: llm.mock ? "mock" : llm.caps("chat").model,
     voice: voiceCfg.mock ? "mock" : "elevenlabs",
     agent: { url: cfg.agentUrl, mode: cfg.agentMode, status: hub.link.status },
     me: me(),
@@ -160,6 +172,7 @@ r.delete("/api/workflows/:id", (q, res) => {
 
 // ───────── serwery MCP ─────────
 registerMcpRoutes(r, { dataDir: cfg.dataDir, bots, link: hub.link, log });
+registerModelRoutes(r, { llm, store, link: hub.link, hasAnthropicKey: !!cfg.anthropicKey, mock: cfg.mock, log });
 
 // ───────── agent ─────────
 r.get("/api/agent/status", async (_q, res) => {
@@ -227,6 +240,7 @@ r.patch("/api/sessions/:id", async (q, res) => {
 r.delete("/api/sessions/:id", (q, res) => {
   hub.close(q.params.id);
   store.deleteSession(q.params.id);
+  removeDir(cfg.dataDir, q.params.id);
   hub.announce(q.params.id);
   json(res, { ok: true });
 });
@@ -253,6 +267,99 @@ r.get("/api/screenshots/:id", async (q, res) => {
     json(res, { error: "agent offline" }, 502);
   }
 });
+// ───────── pliki rozmowy (folder <data>/sessions/<id>/files) ─────────
+const readBody = (q: IncomingMessage, max = 26 * 1024 * 1024) =>
+  new Promise<Buffer>((ok, fail) => {
+    const chunks: Buffer[] = [];
+    let n = 0;
+    q.on("data", (c: Buffer) => {
+      n += c.length;
+      if (n > max) {
+        fail(new Error("plik za duży (maks. 25 MB)"));
+        q.destroy();
+      } else chunks.push(c);
+    });
+    q.on("end", () => ok(Buffer.concat(chunks)));
+    q.on("error", fail);
+  });
+r.get("/api/sessions/:id/files", (q, res) => {
+  if (!store.getSession(q.params.id)) return json(res, { error: "nieznana rozmowa" }, 404);
+  const dir = filesDir(cfg.dataDir, q.params.id);
+  if (q.query.get("all")) return json(res, { dir, entries: listAll(dir) });
+  const entries = listDir(dir, q.query.get("dir") ?? "");
+  if (!entries) return json(res, { error: "nie ma takiego folderu" }, 404);
+  json(res, { dir, entries });
+});
+/** Mutacje folderu: tylko z naszego UI i dla istniejącej rozmowy. */
+const filesGuard = (q: Req, res: ServerResponse) => {
+  if (!fromOwnUi(q)) return void json(res, { error: "tylko z UI Simbota" }, 403);
+  if (!store.getSession(q.params.id)) return void json(res, { error: "nieznana rozmowa" }, 404);
+  return filesDir(cfg.dataDir, q.params.id);
+};
+r.post("/api/sessions/:id/files", async (q, res) => {
+  const dir = filesGuard(q, res);
+  if (!dir) return;
+  try {
+    const data = await readBody(q);
+    json(res, saveFile(dir, q.query.get("name") || "plik", data, q.query.get("dir") ?? ""), 201);
+  } catch (e) {
+    bad(res, e);
+  }
+});
+r.post("/api/sessions/:id/files/mkdir", async (q, res) => {
+  const dir = filesGuard(q, res);
+  if (!dir) return;
+  try {
+    const b = (await readJson(q)) as { parent?: string; name?: string };
+    json(res, { path: makeDir(dir, b.parent ?? "", b.name || "nowy folder") }, 201);
+  } catch (e) {
+    bad(res, e);
+  }
+});
+r.post("/api/sessions/:id/files/move", async (q, res) => {
+  const dir = filesGuard(q, res);
+  if (!dir) return;
+  try {
+    const b = (await readJson(q)) as { from?: string; to?: string };
+    json(res, { path: movePath(dir, b.from ?? "", b.to ?? "") });
+  } catch (e) {
+    bad(res, e);
+  }
+});
+r.post("/api/sessions/:id/files/delete", async (q, res) => {
+  const dir = filesGuard(q, res);
+  if (!dir) return;
+  try {
+    const b = (await readJson(q)) as { paths?: string[] };
+    json(res, { removed: removePaths(dir, Array.isArray(b.paths) ? b.paths.slice(0, 500).map(String) : []) });
+  } catch (e) {
+    bad(res, e);
+  }
+});
+r.post("/api/sessions/:id/files/open", async (q, res) => {
+  const dir = filesGuard(q, res);
+  if (!dir) return;
+  const b = ((await readJson(q).catch(() => ({}))) ?? {}) as { path?: string };
+  mkdirSync(dir, { recursive: true });
+  const target = b.path ? absPath(dir, b.path) : dir;
+  if (!target) return json(res, { error: "nie ma takiego pliku" }, 404);
+  // plik → zaznaczony w Finderze (open -R); folder → otwarty
+  const mac = process.platform === "darwin";
+  const args = mac && b.path ? ["-R", target] : [target];
+  spawn(mac ? "open" : process.platform === "win32" ? "explorer" : "xdg-open", args, { detached: true, stdio: "ignore" }).unref();
+  json(res, { ok: true, dir: target });
+});
+r.get("/api/sessions/:id/files/:name", (q, res) => {
+  const data = readFile(filesDir(cfg.dataDir, q.params.id), decodeURIComponent(q.params.name));
+  if (!data) return json(res, { error: "nie ma takiego pliku" }, 404);
+  const mime = mimeOf(q.params.name);
+  // obrazy i PDF w przeglądarce; reszta jako zwykły tekst / pobranie (bez wykonywania HTML/SVG z folderu)
+  const safe = /^image\/(png|jpeg|gif|webp)$|^application\/pdf$/.test(mime) ? mime : mime.startsWith("text/") || mime === "application/json" || mime === "image/svg+xml" || mime === "text/html" ? "text/plain; charset=utf-8" : "application/octet-stream";
+  // PDF bez sandbox (inaczej wbudowana przeglądarka PDF w Chrome/Electronie pokazuje pustą stronę); reszta — sandbox
+  res.writeHead(200, { "content-type": safe, "x-content-type-options": "nosniff", "cache-control": "private, no-cache", ...(safe === "application/pdf" ? {} : { "content-security-policy": "sandbox" }) });
+  res.end(data);
+});
+
 r.get("/healthz", (_q, res) => json(res, { ok: true }));
 r.get("/", (_q, res) => serveStatic(PUBLIC, res, "index.html"));
 r.get("/*", (q, res) => serveStatic(PUBLIC, res, q.params["*"] || "index.html", q.params["*"]?.startsWith("vendor/") ? "public, max-age=604800" : "no-cache"));
@@ -262,7 +369,7 @@ const wss = new WebSocketServer({ server: srv, path: "/ws" });
 attachWs(wss, hub);
 srv.on("listening", () => {
   console.log(`qwe chat ${cfg.mock ? "(MOCK — bez API) " : ""}→ http://${cfg.host}:${cfg.chatPort}`);
-  console.log(`  llm: ${llm.mock ? "mock" : cfg.chatModel} · voice: ${voiceCfg.mock ? "mock" : "elevenlabs"} · agent: ${cfg.agentMode === "spawn" ? "wstanie po pierwszej akcji" : cfg.agentUrl} · dane: ${cfg.dataDir}`);
+  console.log(`  llm: ${llm.mock ? "mock" : `${llm.caps("chat").provider}/${llm.caps("chat").model}`} · voice: ${voiceCfg.mock ? "mock" : "elevenlabs"} · agent: ${cfg.agentMode === "spawn" ? "wstanie po pierwszej akcji" : cfg.agentUrl} · dane: ${cfg.dataDir}`);
   console.log(`  simy: ${bots.names().join(", ")} · ${cfg.agentsDir} · user: ${me().name || "(bez imienia)"}`);
 });
 process.on("SIGINT", () => process.exit(0));

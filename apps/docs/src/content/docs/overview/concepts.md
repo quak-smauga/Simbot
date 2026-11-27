@@ -32,7 +32,7 @@ flowchart TB
 
 **Rozmowa** (session) — wątek z listą członków (`members[]`, pierwszy = prowadzący) i opcjonalnym workflow. Historia jest jedna, ale każdy sim widzi ją **ze swojej perspektywy**. Żyje w procesie chatu niezależnie od okna: zadanie w tle dojeżdża, karty odtwarzają się po reloadzie. → [Cykl życia tury](/architecture/lifecycle/)
 
-**Workflow** — tekstowa instrukcja, jak simy mają się zachowywać w danej rozmowie („księgowy wystawia, audytor sprawdza”). Tabela `workflows` w SQLite, wchodzi do promptu każdego członka.
+**Workflow** — tekstowa instrukcja, jak simy mają się zachowywać w danej rozmowie („księgowy wystawia, audytor sprawdza”). Tabela `workflows` w SQLite, wchodzi do promptu każdego członka. Linia `łańcuch: N` / `łańcuch: bez limitu` ustawia, ile razy simy mogą się wołać bez usera.
 
 **Mention** — `@sim` (zapytaj), `@sim.task` (zleć zadanie), `@user` (powiadomienie). `@nazwa:` z dwukropkiem to cytat, nie wołanie. → [Mentions](/contracts/mentions/)
 

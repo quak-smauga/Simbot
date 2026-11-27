@@ -145,6 +145,8 @@ PLAN I POSTĘP (gdy w wejściu jest sekcja PLAN):
 export function llmDecider(llm: LlmAdapter, opts: { vision: boolean; model?: string; mode?: "browser" | "desktop" }): Decider {
   return {
     async decide(input, signal) {
+      // model zadań wybrany w UI może nie widzieć obrazów → wtedy bez zrzutu (sama lista elementów strony)
+      const vision = opts.vision && (llm.caps?.("tools").vision ?? true);
       const user = [
         `CEL: ${input.goal}`,
         input.context ? `KONTEKST (z wcześniejszych kroków):\n${input.context}` : "",
@@ -153,7 +155,7 @@ export function llmDecider(llm: LlmAdapter, opts: { vision: boolean; model?: str
         input.log.length ? `OSTATNIE KROKI (${input.step}/${input.maxSteps}):\n${input.log.slice(-12).join("\n")}` : `KROK 1/${input.maxSteps} — jeszcze nic nie zrobiłeś.`,
         input.expect ? `OCZEKIWANE PO OSTATNIEJ AKCJI: ${input.expect}\nPorównaj z obserwacją niżej. Zgadza się → idź dalej (albo stage_done / done). Nie zgadza się → ta akcja NIE zadziałała: nie powtarzaj jej, wybierz inną drogę.` : "",
         `OBSERWACJA (id ${input.observation.observationId}):\n${describeObservation(input.observation)}`,
-        opts.vision && input.observation.screenshot.length ? "Załączony screenshot to aktualny widok tej samej obserwacji." : "",
+        vision && input.observation.screenshot.length ? "Załączony screenshot to aktualny widok tej samej obserwacji." : "",
         "Zwróć następną akcję jako JSON.",
       ]
         .filter(Boolean)
@@ -163,7 +165,7 @@ export function llmDecider(llm: LlmAdapter, opts: { vision: boolean; model?: str
         model: opts.model,
         signal,
         maxTokens: 1200,
-        image: opts.vision && input.observation.screenshot.length ? { data: input.observation.screenshot, mime: "image/jpeg" } : undefined,
+        image: vision && input.observation.screenshot.length ? { data: input.observation.screenshot, mime: "image/jpeg" } : undefined,
       });
       if (!value || typeof (value as { action?: unknown }).action !== "string") throw new Error("decider: brak action w JSON");
       return value;

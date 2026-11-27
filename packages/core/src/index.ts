@@ -3,6 +3,7 @@ export * from "./nativeapi.js";
 export * from "./capability.js";
 export * from "./plan.js";
 export * from "./llm.js";
+export * from "./ollama.js";
 export * from "./manifest.js";
 export * from "./loader.js";
 export * from "./text.js";

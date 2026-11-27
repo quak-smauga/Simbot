@@ -24,7 +24,11 @@ UI to statyczne pliki serwowane przez chat — **vanilla JS, ES modules, bez bun
 | `pages.js` | Onboarding usera, workflowy (lista + edytor), puste stany. |
 | `builder.js` / `avatar.js` | Konstruktor awatara i render awatara (kształt, oczy, usta, akcesoria, wzór, animacja). |
 | `kropka.js` | Holograficzny torus (three.js) sterowany stanem rozmowy: listening, thinking, speaking, working… |
-| `mentions.js` | Podpowiedzi `@` i `.akcja` w composerze. |
+| `models.js` | Przycisk modelu pod polem wiadomości (prawa strona): menu z wyszukiwarką, Claude i Ollama (status, „Uruchom”, pobieranie modelu z paskiem postępu), podmenu „Model do narzędzi ›” (domyślnie ten sam). Ikona oka = model widzi obrazy; żółta kropka = model narzędzi bez vision albo Ollama wyłączona. |
+| `attach.js` | Załączniki: drop-zone na całe okno (tylko dla plików), wklejanie ⌘V, pasek miniatur 57 px nad polem (×, spinner, błąd), zmniejszanie obrazów do 1568 px przed wysłaniem (GIF bez zmian), miniatury w dymku wiadomości. Upload od razu do folderu rozmowy. |
+| `mentions.js` | Podpowiedzi `@` i `.akcja` w composerze; pod simami pasujące pliki i foldery rozmowy, `@[` — same pliki (wstawia `@[ścieżka]`). Sim spoza rozmowy ma opis „przejmie rozmowę”. |
+| `app.js` — chip „Odpowiada” | Nad polem wiadomości: kto odpowie na wiadomość bez @ (prowadzący, awatar i kolor sima). Gdy w polu jest `@sim` — podgląd „Odpowie: @sim” / „@sim przejmie rozmowę”. Klik = wybór prowadzącego (WS `lead`), × = z powrotem Sima. Podgląd pomija `@` w kodzie, cytacie i cudzysłowie. Kilka zmian prowadzącego z rzędu = jedna linia w wątku. Wzmianki `@sim` w kolorze sima. |
+| `files.js` | Panel plików rozmowy po prawej (przełącznik w nagłówku obok ⋮, ⇧⌘F): okruszki, wstecz / dalej, lista i siatka, sortowanie, szukanie, zaznaczanie z klawiatury, podgląd (Spacja), zmiana nazwy w miejscu, nowy folder, przeciąganie (z systemu, między folderami, do pola wiadomości), menu kontekstowe, pasek stanu. Zob. [Pliki rozmowy](/capabilities/files/). |
 | `markdown.js` | Render GFM na żywo, w trakcie streamu. |
 | `audio.js` | Mikrofon → PCM 16 kHz, odtwarzanie `voice.chunk`. |
 | `net.js` | Połączenie WS z reconnectem. |

@@ -5,7 +5,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REPO_ROOT, type AgentEvent, type NativeBlock } from "@qwe/core";
+import { REPO_ROOT, type AgentEvent, type LlmSelection, type NativeBlock } from "@qwe/core";
 
 export interface AgentTaskResult {
   ok: boolean;
@@ -22,6 +22,8 @@ export interface AgentLinkOptions {
   mock: boolean;
   dev: boolean; // uruchomieni przez tsx → agent też przez tsx
   onEvent(e: AgentEvent): void;
+  /** Aktualny wybór modeli — agent dostaje go przy starcie (env) i po każdym połączeniu. */
+  llm?: () => LlmSelection | null;
   log(level: "info" | "warn" | "error", message: string): void;
 }
 
@@ -69,11 +71,23 @@ export class AgentLink {
     this.status = "up";
     this.o.log("info", `[agent] online: ${this.o.url}`);
     this.openStream();
+    // agent mógł wstać sam (QWE_AGENT_MODE=url) albo przed zmianą w UI — wyrównaj wybór modeli
+    void this.setLlm(this.o.llm?.() ?? null);
+  }
+
+  /** Wybór modeli → agent (jeśli żyje; jak nie, dostanie go przy starcie). */
+  async setLlm(selection: LlmSelection | null) {
+    if (this.status !== "up") return;
+    try {
+      await fetch(`${this.o.url}/api/llm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ selection }), signal: AbortSignal.timeout(3000) });
+    } catch (e) {
+      this.o.log("warn", `[agent] nie przekazałem wyboru modeli: ${(e as Error).message}`);
+    }
   }
 
   private spawnAgent() {
     // chat uruchomiony z binarki Electrona (spakowana apka): process.execPath to Electron, nie node → tryb node
-    const env = { ...process.env, QWE_AGENT_PORT: String(this.o.port), QWE_HOST: this.o.host, QWE_MOCK: this.o.mock ? "1" : "0", ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}) };
+    const env = { ...process.env, QWE_AGENT_PORT: String(this.o.port), QWE_HOST: this.o.host, QWE_MOCK: this.o.mock ? "1" : "0", QWE_LLM: JSON.stringify(this.o.llm?.() ?? null), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}) };
     const args = this.o.dev
       ? [fileURLToPath(import.meta.resolve("tsx/cli")), "--conditions=development", resolve(REPO_ROOT, "apps", "agent", "src", "index.ts")]
       : ["--no-warnings=ExperimentalWarning", resolve(REPO_ROOT, "apps", "agent", "dist", "index.js")];

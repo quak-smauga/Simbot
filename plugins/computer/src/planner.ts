@@ -141,6 +141,8 @@ ${COMMON}`;
 export function llmPlanner(llm: LlmAdapter, opts: { model?: string; vision: boolean }): Planner {
   return {
     async plan(input, signal) {
+      // model zadań wybrany w UI może nie widzieć obrazów → wtedy bez zrzutu (sama lista elementów strony)
+      const vision = opts.vision && (llm.caps?.("tools").vision ?? true);
       const prev = input.previous;
       const user = [
         `TRYB: ${input.mode === "desktop" ? "desktop (cały komputer macOS)" : "przeglądarka wbudowana (własne okno, tylko strony WWW)"}`,
@@ -149,7 +151,7 @@ export function llmPlanner(llm: LlmAdapter, opts: { model?: string; vision: bool
         input.required?.length ? `WYMAGANIA OD ZLECAJĄCEGO (każde musi mieć swój etap z "req": numer; nie wolno żadnego pominąć ani osłabić):\n${input.required.map((r, i) => `${i + 1}. ${r}`).join("\n")}` : "",
         prev ? `REPLAN — poprzedni plan:\n${prev.stages.map((s) => `${s.id}. [${s.status}${s.kind ? `, ${s.kind}` : ""}] ${s.title} — zrobione, gdy: ${s.doneWhen}${s.why ? ` (nie zaliczono: ${s.why})` : ""}`).join("\n")}\n\nPRZEBIEG DO TEJ PORY:\n${prev.report}\n\nZostało kroków: ${prev.stepsLeft}.` : "",
         `OBSERWACJA:\n${describeObservation(input.observation, 50)}`,
-        opts.vision && input.observation.screenshot.length ? "Załączony zrzut to ta sama obserwacja." : "",
+        vision && input.observation.screenshot.length ? "Załączony zrzut to ta sama obserwacja." : "",
         "Zwróć plan jako JSON.",
       ].filter(Boolean).join("\n\n");
       const history: Turn[] = [{ role: "user", content: user }];
@@ -157,7 +159,7 @@ export function llmPlanner(llm: LlmAdapter, opts: { model?: string; vision: bool
         model: opts.model,
         signal,
         maxTokens: 900,
-        image: opts.vision && input.observation.screenshot.length ? { data: input.observation.screenshot, mime: "image/jpeg" } : undefined,
+        image: vision && input.observation.screenshot.length ? { data: input.observation.screenshot, mime: "image/jpeg" } : undefined,
       });
       return normalizePlan(value);
     },

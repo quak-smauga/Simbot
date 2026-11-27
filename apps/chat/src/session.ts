@@ -4,22 +4,36 @@
 // albo usera (@imię → powiadomienie). Łańcuch sim→sim ma limit głębokości, żeby się nie zapętlić.
 // Half-duplex: gdy sim mówi, VAD jest wyciszony. Podczas computer taska zwykłe wypowiedzi nie idą do LLM —
 // transkrypcja trafia do command routera (zatrzymaj / wznów / anuluj / przejmuję kontrolę).
-import { EventBus, matchVoiceCommand, resolveTargets, type AgentEvent, type LlmAdapter, type MentionAction } from "@qwe/core";
+import { EventBus, matchVoiceCommand, parseMentions, resolveTargets, voiceAddress, type AgentEvent, type LlmAdapter, type MentionAction } from "@qwe/core";
 import { EnergyVad, VoicePipeline, asVoiceBus, transcribe, type VoiceConfig } from "@qwe/voice";
 import type { AgentLink } from "./agent-link.js";
-import { conversationPrompt, type BotRegistry, type MemoryView } from "./bots.js";
+import { SIMA, conversationPrompt, type BotRegistry, type MemoryView } from "./bots.js";
 import { BotRunner } from "./chat.js";
 import type { ContextKeeper } from "./context.js";
 import { LOCAL_TOOLS, recentConversations, runLocalTool, type RecapWriter } from "./recall.js";
+import { FILE_TOOLS, SCOPE_RE, filesDir, resolveScope, runFileTool } from "./files.js";
 import type { AgentState, ChatBus, ChatEvents } from "./events.js";
 import type { Store } from "./store.js";
 
 /** Eventy, których nie zapisujemy do bazy (za częste albo bez wartości przy odtwarzaniu). */
-const NO_PERSIST = new Set(["session.title", "session.members", "session.workflow", "say.text", "say.start", "say.end", "assistant.message", "user.text", "agent.state", "user.level", "voice.chunk", "voice.end", "voice.played", "voice.abort", "agent.thinking", "log", "user.utterance", "user.heard", "agent.event", "session.voice", "bot.turn", "mention.user", "mention.absent"]);
+const NO_PERSIST = new Set(["session.title", "session.members", "session.workflow", "say.text", "say.start", "say.end", "assistant.message", "user.text", "agent.state", "user.level", "voice.chunk", "voice.end", "voice.played", "voice.abort", "agent.thinking", "log", "user.utterance", "user.heard", "agent.event", "session.voice", "bot.turn", "mention.user", "mention.absent", "chain.limit"]);
 /** Z agent servera zapisujemy to, co UI odtwarza jako karty — także plan i etapy computer.run (bez nich panel po przeładowaniu gubił plan). */
 const PERSIST_AGENT = /^(task\.|plan\.|step\.|computer\.(started|needs_user|completed|failed|cancelled|action|observation|note|loop|plan|stage|resumed|verify)|web\.(started|completed)|tool\.|hello\.)/;
 /** sim → sim → sim: tyle maks. ogniw po wiadomości usera. */
-const MAX_CHAIN = 3;
+/** Ile razy z rzędu sim może zawołać sima bez usera. Workflow zmienia to linią „łańcuch: 20” / „łańcuch: bez limitu”. */
+const CHAIN_DEFAULT = 3;
+/** „bez limitu” = do Stopu, ale z bezpiecznikiem na pętlę, która w nocy przepala tokeny. */
+const CHAIN_HARD = 100;
+/** Workflow ustawia limit linią „łańcuch: 20” albo „łańcuch: bez limitu” (do Stopu, z bezpiecznikiem CHAIN_HARD). */
+export function chainLimitOf(body: string): number {
+  const m = body.match(/^[ \t>*-]*(?:łańcuch|lancuch|chain)\s*:\s*(.+)$/im);
+  if (!m) return CHAIN_DEFAULT;
+  const v = m[1].trim().toLowerCase();
+  if (/^(bez limitu|brak|∞|nieskończon|unlimited|none|off)/.test(v)) return CHAIN_HARD;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, CHAIN_HARD) : CHAIN_DEFAULT;
+}
+type QueueItem = { name: string; action: MentionAction; by: string; joined: boolean };
 /** Migawka pamięci w prompcie odświeża się po takiej przerwie (cache promptu i tak już wygasł — odświeżenie nic nie kosztuje). */
 const MEMORY_REFRESH_IDLE_MS = 5 * 60_000;
 
@@ -30,6 +44,8 @@ export interface SessionDeps {
   voice: VoiceConfig;
   bots: BotRegistry;
   maxTokens: number;
+  /** Katalog danych — folder rozmowy z plikami to <dataDir>/sessions/<id>/files. */
+  dataDir: string;
   /** Kroczące streszczenie rozmowy (po turze, w tle). */
   context?: ContextKeeper;
   /** Recap rozmowy (do pamięci poprzednich rozmów) — po ciszy. */
@@ -47,6 +63,10 @@ export class ChatSession {
   private taskId: string | null = null;
   private utterQueue: Promise<void> = Promise.resolve();
   private busy: Promise<void> = Promise.resolve();
+  /** Pokolenie łańcucha: Stop/Esc i nowa wiadomość usera je podbijają — trwający łańcuch kończy się po bieżącej wypowiedzi. */
+  private gen = 0;
+  /** Kolejka zatrzymana na limicie łańcucha — „Kontynuuj” ją wznawia. */
+  private pending: { queue: QueueItem[]; source: "stt" | "typed" } | null = null;
   private current: BotRunner | null = null;
   private currentBot: string | null = null;
   /** Pamięć w prompcie simów tej rozmowy — zamrożona, żeby nowy fakt w trakcie nie unieważniał cache promptu.
@@ -123,14 +143,42 @@ export class ChatSession {
   get lead(): string | undefined {
     return this.members[0];
   }
-  /** `by` = slug usera albo nazwa sima, który zawołał (@). */
+  /** `by` = slug usera albo nazwa sima, który zawołał (@). Dodany przez usera od razu prowadzi. */
   addMember(name: string, by = this.d.bots.getUser().slug) {
     if (!this.d.bots.get(name)) throw new Error(`nieznany sim: ${name}`);
     const m = this.members;
     if (m.includes(name)) return;
-    this.d.store.setMembers(this.id, [...m, name]);
-    this.bus.emit("session.members", { members: this.members, joined: name, by });
+    const byUser = by === this.d.bots.getUser().slug;
+    this.d.store.setMembers(this.id, byUser ? [name, ...m] : [...m, name]);
+    this.bus.emit("session.members", { members: this.members, joined: name, by, ...(byUser && m[0] ? { lead: name, prev: m[0] } : {}) });
     this.bus.emit("log", { level: "info", message: `[rozmowa] @${name} dołącza (@${by})` });
+    this.d.onListChange?.(this.id);
+  }
+  /**
+   * Prowadzący (odpowiada na wiadomości bez @) = pierwszy członek. Zmienia go user: @sim w wiadomości, chip „Odpowiada”
+   * nad polem albo dodanie sima. Sim wołający innego sima prowadzącego nie zmienia.
+   */
+  setLead(name: string, by = this.d.bots.getUser().slug) {
+    const m = this.members;
+    if (!m.includes(name) || m[0] === name) return;
+    this.d.store.setMembers(this.id, [name, ...m.filter((x) => x !== name)]);
+    this.bus.emit("session.members", { members: this.members, lead: name, prev: m[0], by });
+    this.d.onListChange?.(this.id);
+  }
+  /**
+   * @sim spoza rozmowy zawołany przez usera → przejmuje rozmowę: wchodzi jako prowadzący, a Sima (pośrednik) wychodzi.
+   * Inni simy-specjaliści zostają. User chce specjalisty — rozmawia z nim, nie przez Simę.
+   */
+  takeOver(names: string[], by = this.d.bots.getUser().slug) {
+    const fresh = names.filter((n) => this.d.bots.get(n) && !this.members.includes(n));
+    if (!fresh.length) return;
+    const before = this.members;
+    const keep = before.filter((m) => m !== SIMA || names.includes(SIMA));
+    const left = before.find((m) => !keep.includes(m));
+    this.d.store.setMembers(this.id, [...fresh, ...keep]);
+    if (left) this.runners.delete(left);
+    fresh.forEach((name, i) => this.bus.emit("session.members", { members: this.members, joined: name, by, ...(i === 0 ? { lead: fresh[0], prev: before[0], ...(left ? { left } : {}) } : {}) }));
+    this.bus.emit("log", { level: "info", message: `[rozmowa] ${fresh.map((n) => "@" + n).join(", ")} przejmuje rozmowę${left ? ` (zamiast @${left})` : ""}` });
     this.d.onListChange?.(this.id);
   }
   removeMember(name: string) {
@@ -171,7 +219,16 @@ export class ChatSession {
             workflow: this.workflow,
             recent: this.recent(),
           }),
-        local: (call) => (LOCAL_TOOLS.has(call.name) ? runLocalTool(this.d.store, call, this.id, this.d.bots.getUser().name) : null),
+        local: (call) =>
+          LOCAL_TOOLS.has(call.name)
+            ? runLocalTool(this.d.store, call, this.id, this.d.bots.getUser().name)
+            : FILE_TOOLS.has(call.name)
+              ? runFileTool(this.filesDir, call, this.chatCaps())
+              : null,
+        isLocal: (name) => LOCAL_TOOLS.has(name) || FILE_TOOLS.has(name),
+        filesDir: this.filesDir,
+        caps: () => this.chatCaps(),
+        room: () => (this.members.length > 1 ? this.members : null),
         voice: () => this.d.bots.get(bot)?.manifest.look?.voice ?? "",
         maxTokens: this.d.maxTokens,
         onTurnDone: (exchange) => void this.remember(bot, exchange),
@@ -179,6 +236,13 @@ export class ChatSession {
       this.runners.set(bot, r);
     }
     return r;
+  }
+  get filesDir() {
+    return filesDir(this.d.dataDir, this.id);
+  }
+  /** Co potrafi model rozmowy (obrazy, PDF) — od tego zależy, jak pliki trafiają do kontekstu. */
+  chatCaps() {
+    return this.d.llm.caps?.("chat") ?? { provider: "anthropic" as const, model: "", vision: true, mock: this.d.llm.mock };
   }
   get activeTaskId(): string | null {
     return this.current?.activeTaskId ?? this.taskId;
@@ -220,8 +284,8 @@ export class ChatSession {
     this.vad.push(chunk);
   }
 
-  sendText(text: string) {
-    this.handleText(text, "typed");
+  sendText(text: string, files: string[] = []) {
+    this.handleText(text, "typed", files);
   }
 
   private async onUtterance(pcm: Buffer, sampleRate: number, durationMs: number) {
@@ -238,7 +302,7 @@ export class ChatSession {
     this.handleText(text, "stt");
   }
 
-  private handleText(text: string, source: "stt" | "typed") {
+  private handleText(text: string, source: "stt" | "typed", files: string[] = []) {
     // komputer pracuje → tylko komendy sterujące (głosem albo z pola tekstowego)
     if (this.state === "working" || this.state === "waiting_user") {
       const cmd = matchVoiceCommand(text);
@@ -254,7 +318,24 @@ export class ChatSession {
       this.bus.emit("log", { level: "warn", message: "komputer pracuje — napisz „zatrzymaj”, „wznów”, „anuluj” albo poczekaj na wynik" });
       return;
     }
-    const run = () => this.respondTo(text, source);
+    // nowa wiadomość ma pierwszeństwo: łańcuch simów kończy się po bieżącej wypowiedzi
+    this.gen++;
+    this.pending = null;
+    const run = () => this.respondTo(text, source, files);
+    this.busy = this.busy.then(run, run);
+  }
+
+  /** Limit łańcucha z workflow rozmowy (patrz `chainLimitOf`). */
+  chainLimit(): number {
+    return chainLimitOf(this.workflow?.body ?? "");
+  }
+
+  /** „Kontynuuj” po limicie łańcucha: simy grają dalej od miejsca, w którym stanęły. */
+  continueChain() {
+    const p = this.pending;
+    if (!p) return;
+    this.pending = null;
+    const run = () => this.runQueue(p.queue, p.source);
     this.busy = this.busy.then(run, run);
   }
 
@@ -305,30 +386,56 @@ export class ChatSession {
   }
 
   /** Wiadomość usera → zapis → parser @ → simy po kolei (+ łańcuch sim→sim). */
-  private async respondTo(userText: string, source: "stt" | "typed") {
+  private async respondTo(userText: string, source: "stt" | "typed", files: string[] = []) {
     const { store, bots } = this.d;
     const user = bots.getUser();
-    const msg = store.addMessage(this.id, "user", user.slug, userText, { source });
-    this.bus.emit("user.text", { text: userText, source, messageId: msg.id, author: user.slug });
-    store.setSnip(this.id, `${user.name || "ty"}: ${userText}`, false);
+    // @[ścieżka] → pliki z folderu rozmowy do tej tury
+    const scope = userText.includes("@[") ? resolveScope(this.filesDir, userText) : null;
+    if (scope?.missing.length) this.bus.emit("log", { level: "warn", message: `nie ma w folderze rozmowy: ${scope.missing.join(", ")}` });
+    // kto odpowie: @sim w tekście (@[plik] to nie sim); głosem — nazwa sima na początku („Księgowy, …”)
+    const known = bots.names();
+    let routed = userText.replace(SCOPE_RE, " ");
+    const spokenTo = source === "stt" && !parseMentions(routed).length ? voiceAddress(routed, known) : null;
+    if (spokenTo) routed = `@${spokenTo} ${routed}`;
+    const targets = resolveTargets(routed, { members: this.members, known, user: user.slug, adopt: true });
+    const meta: Record<string, unknown> = { source, to: targets.bots.map((b) => b.name) };
+    if (files.length) meta.files = files;
+    if (scope?.refs.length) meta.scope = { refs: scope.refs, files: scope.files };
+    const msg = store.addMessage(this.id, "user", user.slug, userText, meta);
+    this.bus.emit("user.text", { text: userText, source, messageId: msg.id, author: user.slug, ...(files.length ? { files } : {}) });
+    const clip = files.length ? `📎 ${files.length > 1 ? `${files.length} pliki` : files[0]}${userText ? " · " : ""}` : "";
+    store.setSnip(this.id, `${user.name || "ty"}: ${clip}${userText}`, false);
     this.d.onListChange?.(this.id);
-    void this.autoTitle(userText);
+    void this.autoTitle(userText || `pliki: ${files.join(", ")}`);
 
-    const targets = resolveTargets(userText, { members: this.members, known: bots.names(), user: user.slug });
+    // @sim spoza rozmowy (od usera) wchodzi i prowadzi — zamiast Simy
+    const joining = targets.bots.filter((b) => b.joined).map((b) => b.name);
+    if (joining.length) this.takeOver(joining, user.slug);
+    // zawołany wprost (pierwszy z @) zostaje prowadzącym — kolejne wiadomości bez @ idą do niego
+    else if (!targets.defaulted && targets.bots[0]) this.setLead(targets.bots[0].name, user.slug);
     if (targets.unknown.length) this.bus.emit("log", { level: "warn", message: `nie znam sima: ${targets.unknown.map((u) => "@" + u).join(", ")}` });
     if (targets.absent.length) this.bus.emit("mention.absent", { names: targets.absent });
     if (!targets.bots.length) {
       this.bus.emit("log", { level: "warn", message: "w tej rozmowie nie ma żadnego sima — dodaj kogoś albo napisz @nazwa" });
       return;
     }
+    await this.runQueue(targets.bots.map((b) => ({ ...b, by: user.slug })), source);
+  }
+
+  /** Simy po kolei + łańcuch sim→sim (z limitem z workflow). Przerywa go Stop/Esc albo nowa wiadomość usera. */
+  private async runQueue(queue: QueueItem[], source: "stt" | "typed") {
+    const { store, bots } = this.d;
+    const user = bots.getUser();
+    const myGen = this.gen;
+    const limit = this.chainLimit();
+    const overflow: QueueItem[] = [];
+    let hops = 0;
     this.vad.setMuted(true);
     this.setState("thinking");
     try {
-      const queue: { name: string; action: MentionAction; by: string; joined: boolean }[] = targets.bots.map((b) => ({ ...b, by: user.slug }));
-      let chain = 0;
-      while (queue.length) {
+      while (queue.length && this.gen === myGen) {
         const t = queue.shift()!;
-        if (t.joined) this.addMember(t.name, t.by);
+        if (!this.members.includes(t.name)) this.addMember(t.name, t.by);
         this.bus.emit("bot.turn", { bot: t.name, action: t.action, by: t.by, joined: t.joined });
         const r = this.runner(t.name);
         this.current = r;
@@ -337,18 +444,25 @@ export class ChatSession {
         this.current = null;
         this.currentBot = null;
         await this.voice.waitPlayed();
-        // sim zawołał kogoś? user → powiadomienie; inny sim → dołącza do kolejki (z limitem łańcucha)
+        if (this.gen !== myGen) break; // Stop albo nowa wiadomość — nikogo dalej nie wołamy
+        // sim zawołał kogoś? user → powiadomienie; inny sim → dołącza do kolejki (do limitu łańcucha)
         const next = resolveTargets(said, { members: this.members, known: bots.names(), user: user.slug, from: t.name });
         if (next.userMentioned) {
           const last = store.messagesSince(this.id, store.lastSeq(this.id) - 1).at(-1);
           this.bus.emit("mention.user", { bot: t.name, text: said, messageId: last?.id ?? "" });
         }
-        if (chain < MAX_CHAIN)
-          for (const b of next.bots) {
-            if (queue.some((q) => q.name === b.name)) continue;
+        for (const b of next.bots) {
+          if (queue.some((q) => q.name === b.name) || overflow.some((q) => q.name === b.name)) continue;
+          if (hops < limit) {
             queue.push({ ...b, by: t.name });
-            chain++;
-          }
+            hops++;
+          } else overflow.push({ ...b, by: t.name });
+        }
+      }
+      if (this.gen !== myGen) this.bus.emit("log", { level: "info", message: "[rozmowa] łańcuch simów zatrzymany" });
+      else if (overflow.length) {
+        this.pending = { queue: overflow, source };
+        this.bus.emit("chain.limit", { hops, limit, next: overflow.map((q) => q.name), by: overflow[0].by });
       }
     } finally {
       await new Promise((r) => setTimeout(r, 200));
@@ -362,6 +476,9 @@ export class ChatSession {
 
   /** Esc / barge-in: cisza i koniec myślenia; zadanie komputera w toku zostaje (anuluje się tylko wprost). */
   private interrupt() {
+    // Stop / Esc kończy też łańcuch simów (zadanie komputera trwa — to anuluje się tylko wprost)
+    this.gen++;
+    this.pending = null;
     const waiting = [...this.runners.values()].map((r) => r.interrupt()).some(Boolean);
     this.bus.emit("voice.abort", {});
     if (waiting) this.bus.emit("log", { level: "warn", message: "przerwane mówienie — zadanie komputera trwa dalej (Anuluj albo „anuluj zadanie”, żeby je zatrzymać)" });

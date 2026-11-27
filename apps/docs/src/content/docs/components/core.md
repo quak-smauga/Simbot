@@ -6,6 +6,8 @@ sidebar:
 status: implemented
 sources:
   - packages/core/src/index.ts
+  - packages/core/src/llm.ts
+  - packages/core/src/ollama.ts
   - packages/core/src/selftest.ts
 ---
 
@@ -21,7 +23,8 @@ Biblioteka bez stanu aplikacji. Importują ją chat, agent, CLI i pluginy. Testy
 | `capability.ts` | Kontrakt pluginów | `CapabilityDescriptor`, `ToolCallContext`, `ToolResult`, `WaitReason`, `toolsPrompt()` |
 | `manifest.ts` | Foldery simów | `AgentManifest`, `AgentSpec`, `loadAgentSpec()`, `listAgents()`, `createAgent()`, `writeSkill()`, `writeMemory()` |
 | `loader.ts` | Ładowanie capability | `loadCapabilities()` — `src/index.ts` w dev, `dist/index.js` w buildzie |
-| `llm.ts` | Adapter LLM | `createLlm()` → `LlmAdapter { stream(), json() }` (Anthropic albo mock), `extractJson()` |
+| `llm.ts` | Adapter LLM | `createLlm()` → `SwitchableLlm { stream(), json(), caps(), select() }` (Anthropic, Ollama albo mock), `ANTHROPIC_MODELS`, `extractJson()` |
+| `ollama.ts` | Lokalne modele | `OllamaClient` (`status()`, `models()`, `show()`, `pull()`, `start()`, `stream()`, `json()`), `toOllamaMessages()` |
 | `mentions.ts` | Adresowanie `@` | `parseMentions()`, `resolveTargets()`, `userSlug()`, `MENTION_ACTIONS` |
 | `text.ts` | Tekst z dziurawego STT | `normalize()`, `levenshtein()`, `containsPhrase()`, `matchVoiceCommand()` |
 | `env.ts` | Konfiguracja | `commonConfig()`, `loadDotenv()`, `REPO_ROOT`, `MOCK` |
@@ -49,10 +52,26 @@ interface LlmAdapter {
 }
 ```
 
-- Modele: `QWE_CHAT_MODEL` (rozmowa, domyślnie `claude-sonnet-5-5`) i `QWE_EXECUTOR_MODEL` (computer, pamięć, streszczenia — domyślnie `claude-haiku-5-5`).
-- `QWE_CHAT_THINKING=1` — model myśli przed odpowiedzią (limit +4000 tokenów).
-- Cache promptu: `cache_control` na prompcie systemowym i ostatniej wiadomości.
-- Ograniczenie: jeden obraz dołożony do ostatniej wiadomości (wystarcza dla vision w computer).
+`createLlm()` zwraca `SwitchableLlm`: adapter z dwoma slotami i przełącznikiem w locie.
+
+```ts
+interface SwitchableLlm extends LlmAdapter {
+  caps(slot: "chat" | "tools"): ModelCaps;      // { provider, model, vision, ctx?, mock }
+  select(sel: LlmSelection | null): void;       // wybór z UI; null = modele z env
+  selection(): LlmSelection | null;
+  readonly ollama: OllamaClient;
+}
+interface LlmSelection { chat: LlmSlot; tools?: LlmSlot | null }  // tools puste = ten sam model co rozmowa
+interface LlmSlot { provider: "anthropic" | "ollama"; model: string; vision?: boolean; ctx?: number }
+```
+
+- Sloty: **chat** → `stream()` (rozmowa), **tools** → `json()` (computer, tytuły, streszczenia, recapy, pamięć).
+- Bez wyboru z UI: `QWE_CHAT_MODEL` (domyślnie `claude-sonnet-5-5`) i `QWE_EXECUTOR_MODEL` (domyślnie `claude-haiku-5-5`); wołający może podać własny `opts.model` (np. `QWE_PLANNER_MODEL`).
+- Z wyborem z UI: model slotu wygrywa z `opts.model` wołającego (inaczej model z env trafiłby do API innego dostawcy).
+- `Turn.parts` może zawierać `Media` (`{ kind: "image" | "pdf", data, mime, name? }`): Anthropic → blok `image` / `document`, Ollama → `images` (base64); PDF-ów Ollama nie czyta (zostaje notka).
+- `JsonOptions.image` — jeden obraz do ostatniej wiadomości (computer). Slot `tools` bez vision → obraz pomijany.
+- Anthropic: `cache_control` na prompcie systemowym i ostatniej wiadomości; `QWE_CHAT_THINKING=1` — model myśli przed odpowiedzią (limit +4000 tokenów).
+- Ollama: `POST /api/chat` (stream NDJSON albo `format: "json"`), `num_ctx` = min(kontekst modelu, `QWE_OLLAMA_NUM_CTX`), `stop` z `stopSequences`, `think: false` dla modeli z capability `thinking`. Capabilities i kontekst z `POST /api/show` (cache w procesie). Gdy serwer nie odpowiada — błąd „Ollama nie odpowiada pod … — uruchom ją”.
 
 ## Command router
 

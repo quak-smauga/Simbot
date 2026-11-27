@@ -18,6 +18,7 @@ data/                         QWE_DATA_DIR (domyślnie ./data, w .gitignore)
 ├── chat.db (+ -wal, -shm)    SQLite chatu: rozmowy, wiadomości, eventy, workflowy, ustawienia
 ├── agent-events.jsonl        append-only log eventów agenta
 ├── screenshots/              zrzuty z computer.run (shot_<id>.jpg|png), max 400 w indeksie
+├── sessions/<id>/files/      folder plików rozmowy (upuszczone, wklejone, wrzucone w Finderze); usuwany z rozmową
 ├── browser-profile/          trwały profil Chromium (cookies, sesje, karty)
 ├── mcp.json                  serwery MCP (format mcpServers, 0600 — sekrety); pisze chat
 ├── mcp-catalog.json          co serwery wystawiają (narzędzia, zasoby, prompty); pisze agent, czyta chat
@@ -81,7 +82,7 @@ erDiagram
   }
   settings {
     text key PK
-    text value "JSON — me, me.memory, …"
+    text value "JSON — me, me.memory, llm (wybór modeli), …"
   }
 ```
 
@@ -101,6 +102,7 @@ Trzy zasady z `apps/chat/src/context.ts`:
 1. **Wyniki narzędzi w całości tylko w bieżącej turze.** Starsze → skrót (lista źródeł albo początek raportu, 400 znaków). Pełne zostają w bazie i w UI.
 2. **Kroczące streszczenie.** Gdy niestreszczona część urośnie ponad `QWE_CTX_TRIGGER_CHARS` (40 000 znaków ≈ 12k tokenów), najstarszy kawałek — poza ostatnimi `QWE_CTX_KEEP` (12) wiadomościami — idzie do streszczenia tanim modelem, w tle. Bezpiecznik: maks. 160 wiadomości.
 3. **Stały początek historii** → cache promptu obejmuje też historię, nie tylko prompt systemowy.
+4. **Pliki w treści tylko w turze, w której przyszły** (w budżecie tokenów); w kolejnych turach odnośnik `[plik w folderze rozmowy: …]`. Zob. [Pliki rozmowy](/capabilities/files/).
 
 ## Pamięć: trzy warstwy
 

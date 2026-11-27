@@ -66,8 +66,12 @@ export function create(ctx: CapabilityContext): ToolMap {
         own ? `— od sima (rozmowa):\n${own.slice(0, 1500)}` : "",
         ...Object.entries(call.priorResults).map(([id, r]) => `— krok ${id}:\n${r.text.slice(0, 1500)}`),
       ].filter(Boolean).join("\n\n");
-      if ((args.target ?? "").trim().toLowerCase() === "desktop")
+      if ((args.target ?? "").trim().toLowerCase() === "desktop") {
+        // desktop widać tylko na zrzucie — model zadań bez vision byłby ślepy
+        const tools = ctx.llm.caps?.("tools");
+        if (tools && !tools.mock && !tools.vision) return { ok: false, text: `Tryb desktop wymaga modelu, który widzi obrazy — ${tools.model} nie widzi. Powiedz userowi, żeby wybrał inny model do narzędzi (przycisk modelu pod polem wiadomości).` };
         return desktop.withLock(() => runComputerTask({ goal, context, maxSteps: desktopSteps, browser: desktop, decider: desktopDecider, planner: desktopPlanner, mode: "desktop", call, log: ctx.log, guard: (d) => desktop.guard(d) }));
+      }
       return browser.withLock(() => runComputerTask({ goal, context, maxSteps, browser, decider, planner, mode: "browser", required, call, log: ctx.log }));
     },
   };

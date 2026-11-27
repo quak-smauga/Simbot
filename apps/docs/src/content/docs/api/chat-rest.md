@@ -63,6 +63,17 @@ Tylko z własnego UI: `Host` lokalny, `Origin` (jeśli jest) równy `Host` — i
 
 `PATCH /api/bots/:name` przyjmuje też `mcp: string[]` (serwery sima).
 
+## Modele (LLM)
+
+Wybór z przycisku modelu pod polem wiadomości. Zapis w `settings` (`llm`), przełączenie w locie w chacie i w agencie.
+
+| Metoda | Ścieżka | Body | Opis |
+|---|---|---|---|
+| `GET` | `/api/llm` | — | `{ mock, selection, chat, tools, anthropic: { available, models[] }, ollama: { url, installed, running, version?, models[] } }`. `chat` / `tools` = `ModelCaps` (`provider`, `model`, `vision`, `ctx`, `mock`). Model Ollamy: `id`, `size`, `params`, `family`, `vision`, `ctx` |
+| `PUT` | `/api/llm` | `{ chat: { provider, model }, tools?: { provider, model } \| null }` | zapisuje wybór; `tools` puste = ten sam model. Sprawdza, czy model istnieje (Ollama: `/api/show`; Claude: klucz API). Bez `chat` = powrót do env → `{ selection, chat, tools }` |
+| `POST` | `/api/llm/ollama/start` | — | uruchamia Ollamę (`open -a Ollama` na macu, inaczej `ollama serve`), czeka do 15 s. Tylko z UI |
+| `POST` | `/api/llm/ollama/pull` | `{ model }` | pobiera model; odpowiedź NDJSON: `{ status, total?, completed? }` … `{ done: true }` albo `{ error }`. Tylko z UI |
+
 ## Agent
 
 | Metoda | Ścieżka | Opis |
@@ -78,7 +89,14 @@ Tylko z własnego UI: `Host` lokalny, `Origin` (jeśli jest) równy `Host` — i
 | `POST` | `/api/sessions` | `{ title?, bots?: string[], workflowId? }` | → 201; bez `bots` → rozmowa z Simą |
 | `GET` | `/api/sessions/:id` | — | odtworzenie wątku (niżej) |
 | `PATCH` | `/api/sessions/:id` | `{ title?, bots?, workflowId? }` | zmiana tytułu (ręczny tytuł blokuje auto-tytuł z recapu), składu, workflow |
-| `DELETE` | `/api/sessions/:id` | — | zamyka i usuwa |
+| `DELETE` | `/api/sessions/:id` | — | zamyka i usuwa (razem z folderem plików) |
+| `GET` | `/api/sessions/:id/files?dir=` | — | `{ dir, entries[] }` — zawartość folderu (`dir` = ścieżka względna, puste = korzeń; foldery najpierw): `name`, `path`, `type` (`dir` · `file`), `size`, `mtime`, `kind` (`image` · `pdf` · `text` · `other`), `w`/`h`, `items` (folder). `?all=1` — wszystko rekurencyjnie (maks. 2000). 404, gdy folderu nie ma |
+| `POST` | `/api/sessions/:id/files?name=&dir=` | surowe bajty | zapis do folderu `dir` (maks. 25 MB; nazwa zajęta → „x (2).png”) → 201 + `FileInfo` (`name` = ścieżka względna). Tylko z UI |
+| `POST` | `/api/sessions/:id/files/mkdir` | `{ parent?, name? }` | nowy folder (domyślnie „nowy folder”, zajęte → „(2)”) → 201 `{ path }`. Tylko z UI |
+| `POST` | `/api/sessions/:id/files/move` | `{ from, to }` | zmiana nazwy albo przeniesienie (pliku lub folderu); `to` = pełna nowa ścieżka. Błąd, gdy cel istnieje albo folder do własnego środka → `{ path }`. Tylko z UI |
+| `POST` | `/api/sessions/:id/files/delete` | `{ paths[] }` | usuwa pliki / foldery (rekurencyjnie, trwale; maks. 500) → `{ removed }`. Tylko z UI |
+| `GET` | `/api/sessions/:id/files/:path` | — | plik (ścieżka zakodowana `encodeURIComponent`, `/` jako `%2F`): obrazy i PDF jako takie, tekst/HTML/SVG jako `text/plain`, reszta do pobrania (`nosniff`; `CSP: sandbox` poza PDF — z nim przeglądarka PDF pokazuje pustą stronę) |
+| `POST` | `/api/sessions/:id/files/open` | `{ path? }` | Finder / menedżer plików: bez `path` folder rozmowy, z `path` — ten element (na macOS zaznaczony, `open -R`). Tylko z UI |
 | `POST` | `/api/sessions/:id/control` | `{ op: "pause" \| "resume" \| "cancel", taskId? }` | sterowanie zadaniem (bez `taskId` — aktywne zadanie rozmowy) |
 
 Odpowiedź `GET /api/sessions/:id`:

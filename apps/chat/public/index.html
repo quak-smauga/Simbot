@@ -47,8 +47,8 @@
           <div class="head__sub" id="headSub"></div>
         </div>
         <div class="head__btns">
-                    <button class="btn btn--primary btn--sm addsim" id="addSimBtn" hidden><span data-icon="user-plus" data-size="15"></span><span class="addsim__t">Dodaj sima</span></button>
           <button class="wtoggle" id="widgetBtn" role="switch" aria-checked="false" title="Widget na pulpicie: pokaż / schowaj (⌘⇧W) · polecenie z dowolnego miejsca: ⌥Space"><span data-icon="picture-in-picture-2" data-size="15"></span><span class="wtoggle__t">Widget</span><span class="wtoggle__sw" aria-hidden="true"><i></i></span></button>
+          <button class="ib fbtn" id="filesBtn" title="Pliki rozmowy (⇧⌘F)" aria-pressed="false" aria-controls="fpanel"><span data-icon="folder" data-size="17"></span></button>
           <button class="ib" id="ddBtn" title="Rozmowa: simy, workflow" data-icon="ellipsis-vertical"></button>
         </div>
         <div class="dd" id="dd" hidden></div>
@@ -75,12 +75,13 @@
       <section class="page" id="page" hidden></section>
 
       <footer class="composer" id="composer">
+        <div class="lead" id="lead" hidden></div>
         <div class="cbox" id="cbox">
-          <textarea id="input" rows="1" placeholder="Napisz… @ woła sima" enterkeyhint="send"></textarea>
+          <textarea id="input" rows="1" placeholder="Napisz… @ woła sima albo plik" enterkeyhint="send"></textarea>
           <button class="ib" id="voiceBtn" title="Głos (M)" data-icon="mic"></button>
           <button class="send" id="sendBtn" title="Wyślij (Enter)" data-icon="arrow-up" disabled></button>
         </div>
-        <div class="cmeta"><span id="metaLeft"><code>@sim</code> zwraca się · <code>@sim.task</code> zleca · Shift+Enter nowa linia</span><span id="metaRight"></span></div>
+        <div class="cmeta"><span id="metaLeft"><code>@sim</code> rozmawia · <code>@sim.task</code> zleca · <code>@[plik]</code> pokazuje · Shift+Enter nowa linia</span><span class="cmeta__r"><span id="metaRight"></span><button class="mpick" id="modelBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="Model"></button></span></div>
       </footer>
     </main>
 
@@ -91,6 +92,9 @@
         <div class="work__body" id="workBody"></div>
       </div>
     </aside>
+
+    <!-- ───────── pliki rozmowy (files.js) ───────── -->
+    <aside class="fpanel" id="fpanel" aria-label="Pliki rozmowy"><div class="fpanel__in" id="fpanelIn"></div></aside>
 
     <div class="toast" id="toast"><div id="toastAv"></div><div><b id="toastT"></b><p id="toastP"></p></div></div>
     <script type="module" src="/ui/app.js"></script>

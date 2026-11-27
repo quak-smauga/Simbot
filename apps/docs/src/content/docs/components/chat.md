@@ -11,6 +11,8 @@ sources:
   - apps/chat/src/chat.ts
   - apps/chat/src/bots.ts
   - apps/chat/src/agent-link.ts
+  - apps/chat/src/models.ts
+  - apps/chat/src/files.ts
 ---
 
 Serce aplikacji. Trzyma rozmowy i simy, rozmawia z modelem, prowadzi głos, zleca zadania agentowi i serwuje UI. Port `3100`.
@@ -44,6 +46,8 @@ flowchart TB
 | `bots.ts` | `BotRegistry`: simy z `agents/`, prompt systemowy (kontrakt + persona + skille + narzędzia + pamięć + kontekst rozmowy), CRUD, profil usera, auto-tworzenie Simy. |
 | `context.ts` | Co z rozmowy idzie do modelu: skracanie starych wyników, kroczące streszczenie. |
 | `recall.ts` | Recap rozmów po ciszy, przegląd zaległych, lokalne narzędzie `memory.search`. |
+| `models.ts` | Wybór modeli: `GET/PUT /api/llm`, start Ollamy, pobieranie modeli; zapis w `settings["llm"]`, przekazanie agentowi (`AgentLink.setLlm`). |
+| `files.ts` | Folder plików rozmowy (`<data>/sessions/<id>/files`, z podfolderami): zapis, lista (`listDir`, `listAll`), nowy folder, przeniesienie, usunięcie, wymiary obrazów, `@[ścieżka]` (`resolveScope`), pliki w kontekście (budżet), narzędzia `files.list` / `files.read` / `files.look`. Zob. [Pliki rozmowy](/capabilities/files/). |
 | `agent-link.ts` | `ensure()` (spawn albo `/health`), `submit()` (POST + czekanie na terminalny event), jedno SSE na cały chat. |
 | `store.ts` | SQLite: schemat, migracje, zapytania. Zob. [Dane](/architecture/data/). |
 | `ws.ts` | [WebSocket](/api/chat-ws/): mirror busa rozmowy, binarne audio, lobby. |
@@ -55,7 +59,7 @@ flowchart TB
 Składany w `BotRegistry.systemPrompt()`:
 
 1. `prompts/system.md` — kontrakt: jak mówić (głos vs tekst), `@`, narzędzia i `<nativeapi>`.
-2. `{{TOOLS}}` — `toolsPrompt()` z deskryptorów capability, które sim ma w manifeście, plus `memory.search`.
+2. `{{TOOLS}}` — `toolsPrompt()` z deskryptorów capability, które sim ma w manifeście, plus `memory.search` i `files.*`.
 3. Skille sima (`skills/*.md`).
 4. `persona.md`.
 5. Migawka pamięci (fakty o userze + notatki sima) i lista ostatnich rozmów.

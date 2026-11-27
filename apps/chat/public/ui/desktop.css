@@ -20,6 +20,7 @@ html[data-shell="electron"] .main, html[data-shell="electron"] .work { backgroun
 
 /* nagłówek wątku, pasek strony i nagłówek komputera ciągną okno; przyciski i pola nie */
 html[data-shell="electron"] .head, html[data-shell="electron"] .pagebar, html[data-shell="electron"] .work__head { -webkit-app-region: drag; height: var(--titlebar); }
+html[data-shell="electron"] .fp__head { -webkit-app-region: drag; min-height: var(--titlebar); padding-top: 4px; }
 html[data-shell="electron"] :is(button, input, textarea, select, a, .dd, .menu, .head__input, .head__av) { -webkit-app-region: no-drag; }
 
 /* przełącznik widgetu w nagłówku: pokaż / schowaj kropkę na pulpicie (okno główne zostaje) */

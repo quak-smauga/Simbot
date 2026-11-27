@@ -11,11 +11,12 @@
 //   GET  /api/mcp                    stan serwerów MCP (połączenie, liczba narzędzi)
 //   POST /api/mcp/reload             czyta <data>/mcp.json od nowa i łączy (woła chat po zmianie w UI)
 //   POST /api/mcp/:name/reconnect    zamyka i łączy jeden serwer od nowa
+//   GET/POST /api/llm                wybrane modele (rozmowa / zadania) — chat server wysyła po starcie agenta i przy każdej zmianie
 //   GET  /dashboard/                 podgląd na żywo (pulse rail)
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
-import { REPO_ROOT, Router, builtinPluginDir, commonConfig, createLlm, json, listAgents, loadAgentSpec, loadCapabilities, readCapabilityYaml, readJson, serveStatic, sse, type NativeBlock } from "@qwe/core";
+import { REPO_ROOT, Router, builtinPluginDir, commonConfig, createLlm, json, listAgents, loadAgentSpec, loadCapabilities, readCapabilityYaml, readJson, serveStatic, sse, type LlmSelection, type NativeBlock } from "@qwe/core";
 import { McpManager } from "@qwe/mcp";
 import { AgentRuntime } from "./runtime.js";
 
@@ -33,7 +34,15 @@ const fallback = (): ReturnType<typeof loadAgentSpec> => {
 };
 const spec = specs.find((s) => s.manifest.name === cfg.defaultAgent) ?? specs[0] ?? fallback();
 if (!specs.length) specs.push(spec);
-const llm = createLlm({ apiKey: cfg.anthropicKey, chatModel: cfg.chatModel, executorModel: cfg.executorModel, mock: cfg.mock, chatThinking: cfg.chatThinking });
+// wybór modeli z UI: przy spawnie w env (QWE_LLM, JSON), potem POST /api/llm od chat servera
+const initialSel = ((): LlmSelection | null => {
+  try {
+    return process.env.QWE_LLM ? (JSON.parse(process.env.QWE_LLM) as LlmSelection) : null;
+  } catch {
+    return null;
+  }
+})();
+const llm = createLlm({ apiKey: cfg.anthropicKey, chatModel: cfg.chatModel, executorModel: cfg.executorModel, mock: cfg.mock, chatThinking: cfg.chatThinking, ollamaUrl: cfg.ollamaUrl, ollamaNumCtx: cfg.ollamaNumCtx, selection: initialSel });
 const capabilities = await loadCapabilities(specs, { mock: cfg.mock, dataDir: cfg.dataDir, agentsDir: cfg.agentsDir, env: process.env, llm, log });
 
 // Serwery MCP: jeden menedżer na proces, połączenia żyją między zadaniami. Zmiana stanu/katalogu → event mcp.catalog (chat odświeża prompty).
@@ -109,6 +118,13 @@ r.get("/api/screenshots/:id", (q, res) => {
   if (!s) return json(res, { error: "brak" }, 404);
   res.writeHead(200, { "content-type": s.mime, "content-length": s.buf.length, "cache-control": "public, max-age=86400", "access-control-allow-origin": "*" });
   res.end(s.buf);
+});
+r.get("/api/llm", (_q, res) => json(res, { selection: llm.selection(), chat: llm.caps("chat"), tools: llm.caps("tools") }));
+r.post("/api/llm", async (q, res) => {
+  const body = await readJson<{ selection?: LlmSelection | null }>(q);
+  llm.select(body.selection ?? null);
+  log("info", `[llm] zadania: ${llm.caps("tools").provider}/${llm.caps("tools").model}`);
+  json(res, { chat: llm.caps("chat"), tools: llm.caps("tools") });
 });
 r.get("/api/mcp", (_q, res) => json(res, { servers: mcp.status() }));
 r.post("/api/mcp/reload", async (_q, res) => json(res, { servers: await mcp.reload() }));

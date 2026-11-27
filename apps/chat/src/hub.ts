@@ -35,6 +35,7 @@ export class SessionHub {
     private maxTokens: number,
     readonly mock: boolean,
     linkOpts: Omit<AgentLinkOptions, "onEvent">,
+    private dataDir: string,
   ) {
     this.context = new ContextKeeper(store, llm, () => bots.getUser().name, (level, message) => console[level === "warn" ? "warn" : "log"](message));
     this.recaps = new RecapWriter(
@@ -85,11 +86,11 @@ export class SessionHub {
     const live = this.sessions.get(id);
     if (live) return live;
     if (!this.store.getSession(id)) return null;
-    const s = new ChatSession(id, { store: this.store, llm: this.llm, link: this.link, voice: this.voiceCfg, bots: this.bots, maxTokens: this.maxTokens, context: this.context, recaps: this.recaps, onListChange: (sid) => this.announce(sid) });
+    const s = new ChatSession(id, { store: this.store, llm: this.llm, link: this.link, voice: this.voiceCfg, bots: this.bots, maxTokens: this.maxTokens, dataDir: this.dataDir, context: this.context, recaps: this.recaps, onListChange: (sid) => this.announce(sid) });
     const tag = id.slice(-5);
     s.bus.on("log", ({ level, message }) => console[level === "error" ? "error" : "log"](`[${tag}] ${message}`));
     s.bus.on("say.end", ({ text, bot }) => text && console.log(`[${tag}] 🗨 @${bot}: ${text}`));
-    s.bus.on("user.text", ({ text, source }) => console.log(`[${tag}] 👤 (${source}) ${text}`));
+    s.bus.on("user.text", ({ text, source, files }) => console.log(`[${tag}] 👤 (${source}) ${text}${files?.length ? ` 📎 ${files.join(", ")}` : ""}`));
     s.bus.on("agent.state", () => this.announce(id));
     s.bus.on("mention.user", ({ bot, text }) => {
       if (s.clients) return;

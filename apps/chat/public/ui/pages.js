@@ -1,7 +1,6 @@
-// PAGES — profil usera (onboarding), dodanie sima do rozmowy z Simą, workflowy (lista + edytor), puste stany.
+// PAGES — profil usera (onboarding), workflowy (lista + edytor), puste stany.
 import { $, api, confirmBox, esc, modal, timeAgo, toast } from './dom.js';
 import { makeAvatar, randomConfig } from './avatar.js';
-import { EXAMPLES, exampleBody, freeExamples } from './sims.js';
 import { cfgOf, renderBuilder } from './builder.js';
 
 /** Profil: imię + awatar. locked = onboarding (nie da się zamknąć bez imienia). */
@@ -41,38 +40,6 @@ async function renderUserMemory(host) {
     const c = host.querySelector('[data-clear]'); if (c) c.onclick = async () => { if (await confirmBox('Wyczyścić pamięć o Tobie?', 'Simy zapomną wszystkie zebrane fakty o Tobie. Ich notatki z pracy zostają.', 'Wyczyść')) save([]); };
   };
   draw();
-}
-
-/** „Dodaj sima” w rozmowie z Simą: wybór sima + obok Simy albo zamiast niej. Zwraca { bot, replace } albo undefined. */
-export function addSimToChatDialog(app) {
-  let replace = false;
-  const sima = app.sima?.name;
-  const inChat = app.members.filter(m => m !== sima);
-  return modal((box, close) => {
-    const render = () => {
-      const list = app.bots.filter(b => !inChat.includes(b.name));
-      const examples = freeExamples(app);
-      box.innerHTML = `<h3>Dodaj sima</h3><p>Sim to agent z własną rolą, narzędziami i pamięcią. Dołączy do tej rozmowy — obok Simy albo zamiast niej.</p>
-        ${app.members.includes(sima) ? `<div class="seg" role="tablist"><button class="${replace ? '' : 'on'}" data-mode="add">Obok Simy</button><button class="${replace ? 'on' : ''}" data-mode="replace">Zamiast Simy</button></div>` : ''}
-        ${list.length ? '<div class="pick-k">Twoje simy</div>' : ''}<div class="pick">${list.map(b => `<button class="pb" data-b="${esc(b.name)}"><span class="a"></span><span style="min-width:0"><b>@${esc(b.name)}</b><small>${esc(b.description || 'bez opisu')}</small></span></button>`).join('')}<button class="pb" data-new><span class="a" style="display:grid;place-items:center;font-size:22px;color:var(--ink-3)">+</span><span><b>Nowy sim</b><small>stwórz i dodaj</small></span></button></div>
-        ${examples.length ? `<div class="pick-k">Gotowe przykłady — kliknij, żeby dodać</div><div class="pick">${examples.map(ex => `<button class="pb" data-ex="${esc(ex.name)}"><span class="a"></span><span style="min-width:0"><b>@${esc(ex.name)}</b><small>${esc(ex.description)}</small></span></button>`).join('')}</div>` : ''}
-        <div class="modal__foot"><span class="muted" id="asErr"></span><button class="btn" data-c>Anuluj</button></div>`;
-      box.querySelectorAll('[data-mode]').forEach(el => el.onclick = () => { replace = el.dataset.mode === 'replace'; render(); });
-      box.querySelectorAll('.pb[data-b]').forEach(el => { const b = app.bots.find(x => x.name === el.dataset.b); el.querySelector('.a').append(makeAvatar({ ...cfgOf(b.look), id: '' }, 40)); el.onclick = () => close({ bot: b.name, replace }); });
-      box.querySelectorAll('.pb[data-ex]').forEach(el => {
-        const ex = EXAMPLES.find(x => x.name === el.dataset.ex);
-        el.querySelector('.a').append(makeAvatar({ ...ex.look, id: '' }, 40));
-        el.onclick = async () => {
-          el.disabled = true;
-          try { const b = await api.post('/api/bots', exampleBody(ex)); await app.loadBots(); close({ bot: b.name, replace }); }
-          catch (e) { el.disabled = false; box.querySelector('#asErr').textContent = e.message; }
-        };
-      });
-      box.querySelector('[data-new]').onclick = async () => { const b = await app.addSim({ quiet: true }); if (b) close({ bot: b.name, replace }); };
-      box.querySelector('[data-c]').onclick = () => close(undefined);
-    };
-    render();
-  }, { wide: true });
 }
 
 /** Edytor workflow (nowy albo istniejący). Zwraca zapisany workflow. */
