@@ -14,7 +14,7 @@ sources:
 ## Na dysku
 
 ```
-data/                         QWE_DATA_DIR (domyślnie ./data, w .gitignore)
+data/                         QWE_DATA_DIR (domyślnie <QWE_HOME>/data: w repo ./data, w Simbot.app ~/Library/Application Support/simbot/data)
 ├── chat.db (+ -wal, -shm)    SQLite chatu: rozmowy, wiadomości, eventy, workflowy, ustawienia
 ├── agent-events.jsonl        append-only log eventów agenta
 ├── screenshots/              zrzuty z computer.run (shot_<id>.jpg|png), max 400 w indeksie

@@ -9,9 +9,25 @@ sources:
   - packages/core/src/env.ts
   - plugins/computer/src/index.ts
   - apps/desktop/src/main.js
+  - packages/cli/src/index.ts
 ---
 
-`.env` w korzeniu repo czyta `loadDotenv()` (`packages/core/src/env.ts`); zmienne już ustawione w środowisku wygrywają. Electron czyta z `.env` tylko to, czego potrzebuje skorupa (host, port, skróty).
+`.env` z **domu usera** (`QWE_HOME`, niżej) czyta `loadDotenv()` (`packages/core/src/env.ts`); zmienne już ustawione w środowisku wygrywają. Electron czyta z `.env` tylko to, czego potrzebuje skorupa (host, port, skróty).
+
+## Dom usera (`QWE_HOME`)
+
+Dwa korzenie: **`REPO_ROOT`** — gdzie jest kod (apps, plugins, prompty; w Simbot.app wnętrze paczki, tylko do odczytu) i **`QWE_HOME`** — gdzie mieszka user: `data/`, `agents/`, `.env`. Ścieżki względne z `QWE_DATA_DIR`, `QWE_AGENTS_DIR`, `QWE_AGENT_DIR` liczą się od `QWE_HOME`.
+
+| Tryb | `QWE_HOME` |
+|---|---|
+| repo (`qwe dev`, `qwe desktop`) | korzeń repo — jak dawniej |
+| spakowany Simbot.app (`app.isPackaged`) | `~/Library/Application Support/simbot` (ustawia Electron, chat i agent dziedziczą przez env) |
+| ręcznie | `QWE_HOME=… pnpm qwe desktop` — np. test domu aplikacji z repo |
+
+Dom poza repo przy pierwszym starcie dostaje `data/` i kopię domyślnych simów z paczki (`ensureHome()`); istniejących simów nie nadpisuje. Simy gdzie indziej (repo gita, Dropbox): `QWE_AGENTS_DIR` w `.env` domu. Bazy nie trzymaj w folderze synchronizowanym przez iCloud — SQLite z `-wal` się tam psuje.
+
+- `qwe home` — gdzie jest dom teraz i dom Simbot.app.
+- `qwe home import [--to DIR] [--force]` — kopiuje `data/`, `agents/` i `.env` z repo do domu Simbot.app. Odmawia, gdy chat działa (spójna kopia SQLite) albo cel nie jest pusty (bez `--force`). Repo zostaje bez zmian.
 
 Lista poniżej powstała z przeszukania kodu (`apps/*/src`, `packages/*/src`, `plugins/*/src`). Wszystko, co ustawia user, jest w `.env.example`. Zmienne oznaczone **†** są wewnętrzne — ustawia je CLI, Electron albo obraz Dockera — i celowo ich tam nie ma.
 
@@ -72,7 +88,8 @@ Model wybrany w UI (przycisk pod polem wiadomości, zapis w `settings` pod klucz
 | `QWE_AGENT_PORT` | `7777` | |
 | `QWE_AGENT_MODE` | `spawn` | `spawn` = chat podnosi agenta; `url` = agent już działa |
 | `QWE_AGENT_URL` | `http://127.0.0.1:7777` | |
-| `QWE_AGENT_DIR` | `./agents/sima` | sim dla `qwe inspect` / `qwe build` bez argumentu i fallback agent servera |
+| `QWE_HOME` † | korzeń repo | dom usera: `data/`, `agents/`, `.env` (patrz wyżej) |
+| `QWE_AGENT_DIR` | `<QWE_AGENTS_DIR>/sima` | sim dla `qwe inspect` / `qwe build` bez argumentu i fallback agent servera |
 | `QWE_AGENTS_DIR` | `./agents` | katalog wszystkich simów |
 | `QWE_DEFAULT_AGENT` | `sima` | domyślny sim: tożsamość agent servera i prowadzący, gdy nikt inny nie pasuje |
 | `QWE_DATA_DIR` | `./data` | SQLite, eventy, screenshoty, profil przeglądarki |

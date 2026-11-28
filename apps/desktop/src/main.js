@@ -16,9 +16,17 @@ const ASSETS = resolve(import.meta.dirname, '..', 'assets');
 const PRELOAD = resolve(import.meta.dirname, 'preload.cjs');
 const MOCK = process.argv.includes('--mock') || process.env.QWE_MOCK === '1';
 
-// .env z korzenia repo: tylko to, czego potrzebuje skorupa (host, port, skróty) — resztę czyta chat sam
+app.setName('simbot');
+
+// Dom usera (dane, simy, .env) — poza paczką, żeby aktualizacja nie wymazała pamięci. Spakowany Simbot.app:
+// ~/Library/Application Support/simbot (tam już leży desktop.json). `qwe desktop` z repo: repo, jak dawniej.
+// QWE_HOME z env wygrywa (np. test domu aplikacji z repo). Chat i agent dziedziczą je przez env.
+const HOME = resolve(process.env.QWE_HOME || (app.isPackaged ? app.getPath('userData') : ROOT));
+process.env.QWE_HOME = HOME;
+
+// .env z domu usera: tylko to, czego potrzebuje skorupa (host, port, skróty) — resztę czyta chat sam
 function dotenv() {
-  const f = join(ROOT, '.env');
+  const f = join(HOME, '.env');
   const out = {};
   if (!existsSync(f)) return out;
   for (const line of readFileSync(f, 'utf8').split('\n')) {
@@ -33,8 +41,8 @@ const SHORTCUT_STOP = ENV.QWE_SHORTCUT_STOP || 'Control+Alt+Escape';
 const HOST = ENV.QWE_HOST && ENV.QWE_HOST !== '0.0.0.0' ? ENV.QWE_HOST : '127.0.0.1';
 const PORT = Number(ENV.QWE_CHAT_PORT || 3100);
 const log = msg => console.log(msg);
+log(`[desktop] dom: ${HOME}${HOME === ROOT ? ' (repo)' : ''}`);
 
-app.setName('simbot');
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let server = null;
@@ -407,7 +415,7 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin' && existsSync(join(ASSETS, 'icon.png'))) app.dock.setIcon(join(ASSETS, 'icon.png'));
   buildMenu();
   // most do helpera PRZED chatem: chat → agent dziedziczą QWE_DESKTOP_URL / TOKEN z env
-  const dataDir = resolve(ROOT, ENV.QWE_DATA_DIR || 'data');
+  const dataDir = resolve(HOME, ENV.QWE_DATA_DIR || 'data');
   desktop = createDesktopBridge({ helperPath: helperBinary(ROOT), infoFile: join(dataDir, 'desktop-bridge.json'), getDisplay: () => String(prefs.desktopDisplay), excludeWindowIds: widgetWindowIds, log });
   await desktop.listen();
   refreshPerms();

@@ -10,15 +10,18 @@
 //   qwe run [agentDir|image] [--name N] [--port P] [--no-chat]   agent w kontenerze + chat na hoście (QWE_AGENT_MODE=url)
 //   qwe ps | qwe stop <name> | qwe logs <name>
 //   qwe inspect [agentDir]            co widzi manifest: capability, tools, skille, depsy
-import { existsSync, mkdirSync } from "node:fs";
+//   qwe home                          gdzie leżą dane, simy i .env (QWE_HOME) — w repo i w Simbot.app
+//   qwe home import [--to DIR] [--force]   kopiuje data/, agents/ i .env z repo do domu Simbot.app
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REPO_ROOT, loadAgentSpec, loadDotenv, unionDependencies } from "@qwe/core";
+import { QWE_HOME, REPO_ROOT, loadAgentSpec, loadDotenv, unionDependencies } from "@qwe/core";
 import { dockerBuildAgent, dockerBuildRuntime, planBuild, RUNTIME_IMAGE_DEFAULT } from "./build.js";
 import { sh, shOut } from "./sh.js";
 
-const argv = process.argv.slice(2);
+// `pnpm qwe home` → pnpm dokleja „--” przed argumentami; pomijamy je
+const argv = process.argv.slice(2).filter((a, i) => !(i === 0 && a === "--"));
 const cmd = argv[0] ?? "help";
 const flag = (name: string) => argv.includes(`--${name}`);
 const opt = (name: string) => {
@@ -51,6 +54,8 @@ const help = () => console.log(`qwe — chat + agent + komputer
   qwe build --runtime [--tag T]   obraz bazowy (monorepo + Chromium)
   qwe run [agentDir|image] [--name N] [--port P] [--no-chat]
   qwe ps | qwe stop <name> | qwe logs <name>
+  qwe home                        gdzie leżą dane, simy i .env (repo vs Simbot.app)
+  qwe home import [--to DIR] [--force]   przenieś data/, agents/, .env z repo do domu Simbot.app
 
   --mock = bez kluczy API (skryptowany LLM, ton zamiast głosu, udawany search, skryptowany computer)`);
 
@@ -86,6 +91,39 @@ try {
     case "agent":
       await runApp("agent", flag("mock") ? ["--mock"] : []);
       break;
+
+    case "home": {
+      // Simbot.app trzyma dom w ~/Library/Application Support/simbot (Electron: app.getPath("userData") dla nazwy "simbot")
+      const appHome = resolve(homedir(), "Library", "Application Support", "simbot");
+      if (positional[0] !== "import") {
+        console.log(`dom teraz:      ${QWE_HOME}${QWE_HOME === REPO_ROOT ? "  (repo — tryb dev)" : ""}`);
+        console.log(`dom Simbot.app: ${appHome}${existsSync(resolve(appHome, "data", "chat.db")) ? "" : "  (jeszcze pusty)"}`);
+        console.log(`\nprzeniesienie danych z repo:  qwe home import`);
+        console.log(`test domu aplikacji z repo:   QWE_HOME="${appHome}" pnpm qwe desktop`);
+        break;
+      }
+      const to = resolve(opt("to") ?? appHome);
+      if (to === REPO_ROOT) throw new Error("cel to samo repo — podaj inny --to");
+      // SQLite kopiujemy tylko przy zatrzymanym chacie (inaczej plik -wal może nie mieć ostatnich zapisów)
+      const port = process.env.QWE_CHAT_PORT || "3100";
+      const running = await fetch(`http://127.0.0.1:${port}/api/config`, { signal: AbortSignal.timeout(800) }).then(() => true, () => false);
+      if (running) throw new Error(`chat działa na :${port} — zamknij Simbota (i qwe dev), żeby skopiować bazę w spójnym stanie`);
+      const items = [
+        ["data", resolve(REPO_ROOT, process.env.QWE_DATA_DIR || "data")],
+        ["agents", resolve(REPO_ROOT, process.env.QWE_AGENTS_DIR || "agents")],
+        [".env", resolve(REPO_ROOT, ".env")],
+      ] as const;
+      const taken = items.filter(([name]) => existsSync(resolve(to, name)));
+      if (taken.length && !flag("force")) throw new Error(`w ${to} już jest: ${taken.map(([n]) => n).join(", ")} — dodaj --force, żeby nadpisać`);
+      mkdirSync(to, { recursive: true });
+      for (const [name, from] of items) {
+        if (!existsSync(from)) continue;
+        cpSync(from, resolve(to, name), { recursive: true, force: true });
+        console.log(`✓ ${name}  ${from} → ${resolve(to, name)}`);
+      }
+      console.log(`\ngotowe. Simbot.app wystartuje z tą pamięcią. Repo zostaje bez zmian.`);
+      break;
+    }
 
     case "inspect": {
       const spec = loadAgentSpec(agentDirArg());
@@ -128,7 +166,7 @@ try {
       const port = opt("port") ?? "7777";
       const dataDir = resolve(homedir(), ".qwe", "instances", name);
       mkdirSync(dataDir, { recursive: true });
-      const envFile = resolve(REPO_ROOT, ".env");
+      const envFile = resolve(QWE_HOME, ".env");
       await shOut("docker", ["rm", "-f", `qwe-${name}`]).catch(() => "");
       const args = ["run", "-d", "--name", `qwe-${name}`, "-p", `${port}:7777`, "-v", `${dataDir}:/agent/data`, "-e", `QWE_INSTANCE_ID=${name}`, "--label", "org.qwe.instance=1"];
       if (existsSync(envFile)) args.push("--env-file", envFile);

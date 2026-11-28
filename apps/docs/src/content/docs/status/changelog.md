@@ -7,6 +7,13 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-28 — dom usera poza repo (`QWE_HOME`)
+
+- Rozdzielone korzenie: `REPO_ROOT` (kod) i `QWE_HOME` (dane, simy, `.env`). W repo bez zmian; spakowany Simbot.app ustawia `~/Library/Application Support/simbot`.
+- `ensureHome()`: pierwszy start w nowym domu zakłada `data/` i kopiuje domyślne simy, nie nadpisując istniejących. `QWE_AGENT_DIR` domyślnie podąża za `QWE_AGENTS_DIR`.
+- CLI: `qwe home`, `qwe home import [--to] [--force]`; `pnpm qwe …` nie gubi już komendy przez doklejone `--`.
+- Strony docsów: [Konfiguracja](/development/configuration/), [Dane](/architecture/data/).
+
 ## 2026-11-28 — Stop i limit łańcucha z workflow
 
 - **Stop**: przycisk wysyłania zamienia się w Stop, gdy simy myślą/mówią (pole puste). `interrupt` (Stop/Esc) kończy teraz też łańcuch sim→sim; nowa wiadomość usera kończy łańcuch po bieżącej wypowiedzi.

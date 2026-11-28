@@ -1,10 +1,15 @@
-// ENV — jedno miejsce czytania process.env dla obu serwerów. `.env` ładujemy z korzenia repo (jeśli jest).
-import { existsSync, readFileSync } from "node:fs";
+// ENV — jedno miejsce czytania process.env dla obu serwerów.
+// Dwa korzenie:
+//   REPO_ROOT  — gdzie jest KOD (apps/, plugins/, prompty). W Simbot.app to wnętrze paczki: tylko do odczytu.
+//   QWE_HOME   — gdzie MIESZKA user: data/ (SQLite, pliki rozmów, profil przeglądarki), agents/ (simy), .env.
+//                W repo = REPO_ROOT (jak dawniej). Simbot.app ustawia ~/Library/Application Support/simbot.
+import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const REPO_ROOT = resolve(import.meta.dirname, "..", "..", "..");
+export const QWE_HOME = resolve(process.env.QWE_HOME || REPO_ROOT);
 
-export function loadDotenv(file = resolve(REPO_ROOT, ".env")) {
+export function loadDotenv(file = resolve(QWE_HOME, ".env")) {
   if (!existsSync(file)) return;
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line.replace(/\s+#.*$/, ""));
@@ -27,10 +32,13 @@ export const envBool = (name: string, fallback: boolean) => {
 
 export function commonConfig() {
   loadDotenv();
-  const dataDir = resolve(REPO_ROOT, env("QWE_DATA_DIR", "./data"));
-  const agentsDir = resolve(REPO_ROOT, env("QWE_AGENTS_DIR", "./agents"));
-  const agentDir = resolve(REPO_ROOT, env("QWE_AGENT_DIR", "./agents/sima"));
+  // ścieżki względne liczone od domu usera; QWE_AGENTS_DIR w .env domu = simy gdzie indziej (np. repo gita, Dropbox)
+  const dataDir = resolve(QWE_HOME, env("QWE_DATA_DIR", "./data"));
+  const agentsDir = resolve(QWE_HOME, env("QWE_AGENTS_DIR", "./agents"));
+  const agentDir = env("QWE_AGENT_DIR") ? resolve(QWE_HOME, env("QWE_AGENT_DIR")) : resolve(agentsDir, "sima");
+  ensureHome(dataDir, agentsDir);
   return {
+    home: QWE_HOME,
     mock: MOCK,
     anthropicKey: env("ANTHROPIC_API_KEY"),
     chatModel: env("QWE_CHAT_MODEL", "claude-sonnet-5-5"),
@@ -49,4 +57,15 @@ export function commonConfig() {
     defaultAgent: env("QWE_DEFAULT_AGENT", "sima"),
     dataDir,
   };
+}
+
+/**
+ * Dom poza repo (Simbot.app): przy pierwszym starcie zakłada data/ i kopiuje domyślne simy z paczki.
+ * Istniejących simów nigdy nie nadpisuje — aktualizacja aplikacji nie rusza tego, co user zmienił.
+ */
+export function ensureHome(dataDir: string, agentsDir: string) {
+  if (QWE_HOME === REPO_ROOT) return;
+  mkdirSync(dataDir, { recursive: true });
+  const bundled = resolve(REPO_ROOT, "agents");
+  if (!existsSync(agentsDir) && existsSync(bundled)) cpSync(bundled, agentsDir, { recursive: true });
 }
