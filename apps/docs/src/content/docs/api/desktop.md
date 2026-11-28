@@ -8,6 +8,7 @@ sources:
   - apps/desktop/src/preload.cjs
   - apps/desktop/src/main.js
   - apps/desktop/src/desktop.js
+  - apps/desktop/src/secrets.js
   - apps/desktop/helper/qwe-helper.swift
   - plugins/computer/src/desktop.ts
 ---
@@ -37,11 +38,16 @@ Jedyny most UI ↔ Electron, wyłącznie dla operacji desktopowych; dane i tak i
 | `focus()` / `release()` / `hide()` | `widget:focus` / `release` / `hide` | fokus i chowanie widgetu |
 | `menu()` | `widget:menu` | menu kontekstowe (jak tray) |
 | `dragStart()` / `drag(dx, dy)` / `dragEnd()` | `widget:drag-*` | przeciąganie z przyklejaniem do krawędzi |
+| `secrets.status()` | `secrets:status` (invoke) | `{ keys: { NAZWA: { label, required?, hint, set, source: "app" \| "env" \| null, tail } }, available, home }` — **bez wartości kluczy** |
+| `secrets.test(name, value)` | `secrets:test` (invoke) | test u dostawcy bez kosztów (dziś tylko Anthropic: `GET /v1/models`) → `{ ok, error?, skipped? }` |
+| `secrets.set(values, restart = true)` | `secrets:set` (invoke) | zapis w pęku kluczy (pusta wartość = usuń) + restart chatu → okna się przeładowują; `{ restarted, reason?, keys }` |
+| `perms.status()` | `perms:status` (invoke) | `{ screen, accessibility, helper }` |
+| `perms.request(kind)` | `perms:request` (invoke) | okno zgody helpera + panel Ustawień systemowych (`screen` \| `accessibility`) |
 | `on(channel, cb)` | — | subskrypcja; zwraca funkcję odpinającą |
 
-Kanały `widget:*` main przyjmuje **tylko z okna widgetu** (`fromWidget(e)`).
+Kanały `widget:*` main przyjmuje **tylko z okna widgetu** (`fromWidget(e)`), a `secrets:*` i `perms:*` **tylko z okna głównego** (`fromMain(e)`).
 
-Kanały main → UI (`on`): `qwe:session`, `qwe:command`, `qwe:open-session`, `qwe:new`, `qwe:find`, `qwe:stopped`, `qwe:collapse`, `qwe:attention`, `qwe:widget-visible`. Inne nazwy są ignorowane.
+Kanały main → UI (`on`): `qwe:session`, `qwe:command`, `qwe:open-session`, `qwe:new`, `qwe:find`, `qwe:stopped`, `qwe:collapse`, `qwe:attention`, `qwe:widget-visible`, `qwe:keys` (otwórz „Klucze API”). Inne nazwy są ignorowane.
 
 ## Desktop bridge
 

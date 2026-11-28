@@ -16,7 +16,7 @@
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, resolve } from "node:path";
-import { REPO_ROOT, Router, builtinPluginDir, commonConfig, createLlm, json, listAgents, loadAgentSpec, loadCapabilities, readCapabilityYaml, readJson, serveStatic, sse, type LlmSelection, type NativeBlock } from "@qwe/core";
+import { Router, builtinPluginDir, commonConfig, createLlm, json, listAgents, loadAgentSpec, loadCapabilities, readCapabilityYaml, readJson, serveStatic, sse, type LlmSelection, type NativeBlock } from "@qwe/core";
 import { McpManager } from "@qwe/mcp";
 import { AgentRuntime } from "./runtime.js";
 
@@ -49,7 +49,8 @@ const capabilities = await loadCapabilities(specs, { mock: cfg.mock, dataDir: cf
 const mcp = new McpManager({
   dataDir: cfg.dataDir,
   agentsDir: cfg.agentsDir,
-  cwd: REPO_ROOT,
+  // ścieżki względne serwerów (np. `node robot-mcp.mjs`) liczone od domu usera — w repo to repo, w Simbot.app Application Support
+  cwd: cfg.home,
   log,
   onChange: (s) => void rt.events.append({ type: "mcp.catalog", data: { ...s } }),
 });

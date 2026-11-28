@@ -9,9 +9,51 @@
     "dev": "electron .",
     "mock": "electron . --mock",
     "icons": "node scripts/make-icons.js",
-    "helper": "mkdir -p helper/build && swiftc -O -target $(uname -m)-apple-macos14.0 helper/qwe-helper.swift -o helper/build/qwe-helper"
+    "helper": "mkdir -p helper/build && swiftc -O -target $(uname -m)-apple-macos14.0 helper/qwe-helper.swift -o helper/build/qwe-helper",
+    "stage": "node scripts/stage.mjs",
+    "app": "node scripts/stage.mjs && electron-builder --mac dir",
+    "app:dmg": "node scripts/stage.mjs && electron-builder --mac dmg"
   },
   "devDependencies": {
-    "electron": "45.2.3"
+    "electron": "45.2.3",
+    "electron-builder": "^26.18.0",
+    "esbuild": "0.28.2"
+  },
+  "productName": "Simbot",
+  "build": {
+    "appId": "pl.quak.simbot",
+    "productName": "Simbot",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "electronDist": "node_modules/electron/dist",
+    "electronVersion": "45.2.3",
+    "npmRebuild": false,
+    "asar": true,
+    "files": [
+      "src/**",
+      "assets/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/runtime",
+        "to": "runtime"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Simbot słucha, gdy rozmawiasz z simami głosem.",
+        "LSUIElement": false
+      }
+    },
+    "dmg": {
+      "title": "Simbot"
+    }
   }
 }

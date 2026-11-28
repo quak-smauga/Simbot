@@ -16,7 +16,7 @@ import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { QWE_HOME, REPO_ROOT, loadAgentSpec, loadDotenv, unionDependencies } from "@qwe/core";
+import { QWE_HOME, REPO_ROOT, loadAgentSpec, loadDotenv, readMcpConfig, unionDependencies, writeMcpConfig } from "@qwe/core";
 import { dockerBuildAgent, dockerBuildRuntime, planBuild, RUNTIME_IMAGE_DEFAULT } from "./build.js";
 import { sh, shOut } from "./sh.js";
 
@@ -120,6 +120,16 @@ try {
         if (!existsSync(from)) continue;
         cpSync(from, resolve(to, name), { recursive: true, force: true });
         console.log(`✓ ${name}  ${from} → ${resolve(to, name)}`);
+      }
+      // serwery MCP ze ścieżkami względnymi do repo (`node robot-mcp.mjs`) — w nowym domu startowałyby gdzie indziej
+      const mcpFile = resolve(to, "data", "mcp.json");
+      if (existsSync(mcpFile)) {
+        const cfg = readMcpConfig(resolve(to, "data"));
+        const pinned = Object.entries(cfg.mcpServers).filter(([, s]) => s.command && !s.cwd).map(([n, s]) => ((s.cwd = REPO_ROOT), n));
+        if (pinned.length) {
+          writeMcpConfig(resolve(to, "data"), cfg);
+          console.log(`✓ mcp.json  ${pinned.join(", ")}: cwd = ${REPO_ROOT}`);
+        }
       }
       console.log(`\ngotowe. Simbot.app wystartuje z tą pamięcią. Repo zostaje bez zmian.`);
       break;

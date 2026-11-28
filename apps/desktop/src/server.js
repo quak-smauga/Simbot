@@ -19,7 +19,7 @@ export async function probe(base) {
   }
 }
 
-export async function ensureServer({ root, host, port, mock, log }) {
+export async function ensureServer({ root, host, port, mock, packaged = false, log }) {
   const base = `http://${host}:${port}`;
   const found = await probe(base);
   if (found === 'qwe') {
@@ -28,15 +28,17 @@ export async function ensureServer({ root, host, port, mock, log }) {
   }
   if (found === 'other') throw new Error(`port ${port} zajęty przez coś innego niż qwe (ustaw QWE_CHAT_PORT w .env)`);
 
-  const node = process.env.QWE_NODE || 'node';
+  // Simbot.app: chat na binarce Electrona w trybie Node (Node 24 z node:sqlite) — bez osobnego Node w paczce i u usera
+  const node = packaged ? process.execPath : process.env.QWE_NODE || 'node';
   const dist = resolve(root, 'apps/chat/dist/index.js');
-  const useDist = process.env.QWE_DESKTOP_DIST === '1' && existsSync(dist);
+  const useDist = (packaged || process.env.QWE_DESKTOP_DIST === '1') && existsSync(dist);
+  if (packaged && !useDist) throw new Error(`brak ${dist} — paczka bez runtime'u (scripts/stage.mjs)`);
   const args = useDist
     ? ['--no-warnings=ExperimentalWarning', dist]
     : [resolve(root, 'node_modules/tsx/dist/cli.mjs'), '--conditions=development', resolve(root, 'apps/chat/src/index.ts')];
   if (mock) args.push('--mock');
   log(`[desktop] startuję chat: ${node} ${useDist ? 'dist' : 'tsx src'}${mock ? ' --mock' : ''}`);
-  const child = spawn(node, args, { cwd: root, env: { ...process.env, QWE_CHAT_PORT: String(port), QWE_HOST: host }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(node, args, { cwd: root, env: { ...process.env, QWE_CHAT_PORT: String(port), QWE_HOST: host, ...(packaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   let exited = null;
   child.stdout.on('data', d => process.stdout.write(`  [chat] ${String(d).trimEnd()}\n`));
   child.stderr.on('data', d => process.stderr.write(`  [chat!] ${String(d).trimEnd()}\n`));

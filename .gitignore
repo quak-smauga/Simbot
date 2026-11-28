@@ -11,3 +11,5 @@ agents/*
 !agents/.gitkeep
 data-test/
 apps/desktop/helper/build/
+apps/desktop/build/
+apps/desktop/release/

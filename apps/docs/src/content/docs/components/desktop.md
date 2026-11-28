@@ -9,6 +9,9 @@ sources:
   - apps/desktop/src/preload.cjs
   - apps/desktop/src/server.js
   - apps/desktop/src/desktop.js
+  - apps/desktop/src/secrets.js
+  - apps/desktop/scripts/stage.mjs
+  - apps/desktop/package.json
   - apps/desktop/helper/qwe-helper.swift
   - apps/chat/public/ui/widget.js
 ---
@@ -69,6 +72,32 @@ Pokaż/schowaj widget · Polecenie… · Otwórz simbot · Nowa rozmowa · Wstrz
 | Startuj bez okna (tylko widget) | tak / nie |
 | Komputer: ekran agenta | aktywny (z oknem na wierzchu) albo konkretny monitor |
 | Komputer: uprawnienia | stan i nadawanie: Nagrywanie ekranu, Dostępność |
+| Klucze API… | okno kluczy w aplikacji (to samo co ⋯ → Klucze API) |
+| Pokaż dane w Finderze | otwiera dom usera (`QWE_HOME`) |
+
+## Simbot.app (build)
+
+```bash
+pnpm app        # release/mac/Simbot.app
+pnpm app:dmg    # release/Simbot-<wersja>.dmg
+```
+
+Dwa etapy:
+
+1. **`scripts/stage.mjs` → `apps/desktop/build/runtime`** (~25 MB, < 1 s). esbuild pakuje chat, agenta i każdy plugin w jeden plik (warunek `development` = źródła `.ts` wprost, bez `tsc`), w **tym samym układzie katalogów co monorepo** — ścieżki liczone od `REPO_ROOT` (prompty, `public/`, `plugins/<nazwa>`) działają bez zmian. Obok: `public/`, `prompts/`, `capability.yaml`, `node_modules/playwright{,-core}` (jedyna zależność poza bundlem, kopiowana z magazynu pnpm), helper Swift (budowany, jeśli go nie ma) i domyślne simy z `examples/` (nigdy `agents/` z repo — tam jest pamięć simów).
+2. **electron-builder** (`build` w `apps/desktop/package.json`): `src/` + `assets/` w `app.asar`, runtime jako `Resources/runtime`, Electron z `node_modules` (bez pobierania), podpis ad-hoc (`identity: "-"`), `NSMicrophoneUsageDescription`.
+
+W paczce (`app.isPackaged`): `ROOT` = `Resources/runtime`, chat i agent działają na **binarce Simbota w trybie Node** (`ELECTRON_RUN_AS_NODE=1`, Node 24 z `node:sqlite`) — bez osobnego Node. PATH dostaje `/opt/homebrew/bin` i `/usr/local/bin` (aplikacja z Docka ma tylko `/usr/bin:/bin`). Serwery MCP startują w domu usera; `node` w ich komendzie = Node agenta.
+
+Ograniczenia dziś: podpis ad-hoc (bez Developer ID i notaryzacji — na innym Macu Gatekeeper zapyta; zgody macOS mogą wymagać ponownego nadania po przebudowie), Chromium dla `computer.run` z cache Playwrighta (`~/Library/Caches/ms-playwright`) albo `QWE_COMPUTER_CHANNEL=chrome`, tylko architektura maszyny, na której budujesz.
+
+## Dom i klucze
+
+Dom usera (`QWE_HOME`): w repo korzeń repo, w spakowanej aplikacji `~/Library/Application Support/simbot` — zob. [Konfiguracja](/development/configuration/#dom-usera-qwe_home).
+
+**Klucze API** (`secrets.js`): Anthropic, ElevenLabs, Tavily, Brave. Szyfrowane przez `safeStorage` (klucz szyfrujący w pęku kluczy macOS) w `~/Library/Application Support/simbot/secrets.json` — zawsze w `userData`, także w trybie dev, nigdy w repo. Przed startem chatu `applySecrets()` wkłada je do env procesu; chat i agent dziedziczą je i wygrywają z `.env` (bo `loadDotenv()` nie nadpisuje ustawionych zmiennych). Usunięty klucz → wraca wartość z shella albo `.env`. Zmiana kluczy = restart procesu chatu (`restartServer()`) i przeładowanie okien; gdy desktop jest podpięty pod osobne `qwe dev`, nie restartuje cudzego procesu i mówi, co zrobić.
+
+**Pierwsze uruchomienie** (`public/ui/welcome.js`): w Electronie, bez `--mock`, gdy simy nie mają żadnego modelu (`/api/config` → `llm: "mock"`) — okno „Cześć! Tu Simbot.”: klucz Anthropic (sprawdzany od razu), opcjonalne klucze, potem zgody macOS (stan odświeżany co 2,5 s, można pominąć). „Pomiń klucz” = modele z Ollamy (`localStorage qwe.welcome.skipKey`). Potem jak dawniej: imię i awatar.
 
 ## Skróty
 

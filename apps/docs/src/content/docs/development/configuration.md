@@ -26,8 +26,10 @@ Dwa korzenie: **`REPO_ROOT`** — gdzie jest kod (apps, plugins, prompty; w Simb
 
 Dom poza repo przy pierwszym starcie dostaje `data/` i kopię domyślnych simów z paczki (`ensureHome()`); istniejących simów nie nadpisuje. Simy gdzie indziej (repo gita, Dropbox): `QWE_AGENTS_DIR` w `.env` domu. Bazy nie trzymaj w folderze synchronizowanym przez iCloud — SQLite z `-wal` się tam psuje.
 
+W Simbot.app klucze API (Anthropic, ElevenLabs, Tavily, Brave) wpisuje się w oknie aplikacji — trafiają do pęku kluczy macOS i wygrywają z `.env`. Zob. [Desktop → Dom i klucze](/components/desktop/#dom-i-klucze).
+
 - `qwe home` — gdzie jest dom teraz i dom Simbot.app.
-- `qwe home import [--to DIR] [--force]` — kopiuje `data/`, `agents/` i `.env` z repo do domu Simbot.app. Odmawia, gdy chat działa (spójna kopia SQLite) albo cel nie jest pusty (bez `--force`). Repo zostaje bez zmian.
+- `qwe home import [--to DIR] [--force]` — kopiuje `data/`, `agents/` i `.env` z repo do domu Simbot.app. Odmawia, gdy chat działa (spójna kopia SQLite) albo cel nie jest pusty (bez `--force`). Serwerom MCP bez `cwd` dopisuje `cwd` = repo (ścieżki względne jak `node robot-mcp.mjs`). Repo zostaje bez zmian.
 
 Lista poniżej powstała z przeszukania kodu (`apps/*/src`, `packages/*/src`, `plugins/*/src`). Wszystko, co ustawia user, jest w `.env.example`. Zmienne oznaczone **†** są wewnętrzne — ustawia je CLI, Electron albo obraz Dockera — i celowo ich tam nie ma.
 

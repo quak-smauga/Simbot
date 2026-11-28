@@ -441,6 +441,19 @@ body[data-nav="open"] .nav { transform: none; }
 .form { display: flex; flex-direction: column; gap: 14px; }
 .form .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .form .row > * { flex: 1; min-width: 140px; }
+/* klucze API / powitanie (welcome.js) */
+.field i.muted { font-style: normal; font-weight: 400; }
+.field small { font-size: 12px; line-height: 1.4; }
+.linkbtn { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; font-size: inherit; padding: 0; }
+.linkbtn:hover { color: var(--ink); }
+.keys__more > summary { cursor: pointer; font-size: 13px; color: var(--ink-2); padding: 2px 0; }
+.keys__more[open] > summary { margin-bottom: 12px; }
+.modal__box > p.keys__alt { margin: 16px 0 0; font-size: 13px; }
+.perms { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; }
+.perm { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: var(--soft); }
+.perm > div { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.perm small { font-size: 12px; }
+.perm__ok { font-size: 13px; color: var(--ink-2); }
 .hintl { font-size: 12.5px; color: var(--ink-3); }
 
 /* ───────── konstruktor awatara ───────── */

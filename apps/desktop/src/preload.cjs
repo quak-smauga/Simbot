@@ -2,7 +2,7 @@
 // UI działa też w zwykłej przeglądarce: tam `window.qwe` po prostu nie istnieje.
 const { contextBridge, ipcRenderer } = require('electron');
 
-const CHANNELS = new Set(['qwe:session', 'qwe:command', 'qwe:open-session', 'qwe:new', 'qwe:find', 'qwe:stopped', 'qwe:collapse', 'qwe:attention', 'qwe:widget-visible']);
+const CHANNELS = new Set(['qwe:session', 'qwe:command', 'qwe:open-session', 'qwe:new', 'qwe:find', 'qwe:stopped', 'qwe:collapse', 'qwe:attention', 'qwe:widget-visible', 'qwe:keys']);
 
 contextBridge.exposeInMainWorld('qwe', {
   desktop: true,
@@ -14,6 +14,18 @@ contextBridge.exposeInMainWorld('qwe', {
   /** okno główne na tej rozmowie i tym zadaniu (handoff z widgetu) */
   openMain: (sessionId, taskId) => ipcRenderer.send('app:open-main', { sessionId: sessionId || null, taskId: taskId || null }),
   stopAll: () => ipcRenderer.send('app:stop-all'),
+  /** klucze API w pęku kluczy macOS — UI dostaje tylko stan (ustawiony, końcówka), nigdy wartość */
+  secrets: {
+    status: () => ipcRenderer.invoke('secrets:status'),
+    test: (name, value) => ipcRenderer.invoke('secrets:test', { name, value }),
+    /** zapis (pusta wartość = usuń) + restart chatu, żeby wziął nowe klucze */
+    set: (values, restart = true) => ipcRenderer.invoke('secrets:set', { values, restart }),
+  },
+  /** zgody macOS dla sterowania komputerem: { screen, accessibility } + otwarcie właściwego panelu */
+  perms: {
+    status: () => ipcRenderer.invoke('perms:status'),
+    request: kind => ipcRenderer.invoke('perms:request', kind),
+  },
   /** motyw UI → macOS (vibrancy i światła okna w tym samym trybie co aplikacja) */
   setTheme: t => ipcRenderer.send('app:theme', t),
   // ── widget ──

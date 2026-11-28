@@ -7,6 +7,21 @@ sidebar:
 
 Tu trafiają zmiany, po których **ktoś musiałby inaczej rozumieć system**: nowy proces, nowy kanał, zmiana kontraktu, nowa capability, nowy event w katalogu. Najnowsze na górze.
 
+## 2026-11-28 — Simbot.app (electron-builder)
+
+- `apps/desktop/scripts/stage.mjs`: runtime dla paczki (esbuild, układ jak w monorepo, playwright, helper, simy z `examples/`); electron-builder w `apps/desktop/package.json`; skróty `pnpm app`, `pnpm app:dmg`.
+- Spakowana aplikacja: `ROOT` = `Resources/runtime`, chat i agent na binarce Simbota w trybie Node (`ELECTRON_RUN_AS_NODE`), PATH z Homebrew.
+- Serwery MCP startują w domu usera (`QWE_HOME`), nie w katalogu kodu; `qwe home import` dopisuje `cwd` = repo serwerom ze ścieżkami względnymi.
+- Zamknięcie aplikacji: po zatrzymaniu chatu `app.exit(0)` (drugie `app.quit()` w `will-quit` Electron 45 ignorował — proces wisiał).
+- Strony docsów: [Desktop](/components/desktop/), [CLI](/components/cli/), [Konfiguracja](/development/configuration/).
+
+## 2026-11-28 — klucze API w pęku kluczy, powitanie Simbot.app
+
+- `apps/desktop/src/secrets.js`: klucze szyfrowane `safeStorage` (async API) w `userData/secrets.json`; Electron wkłada je do env chatu przed startem, zmiana = restart chatu i przeładowanie okien.
+- Nowe IPC (invoke, tylko z okna głównego): `secrets:status|test|set`, `perms:status|request`; kanał `qwe:keys`. `window.qwe.secrets` / `window.qwe.perms`.
+- UI: `welcome.js` — powitanie (klucz Anthropic sprawdzany od razu, opcjonalne klucze, zgody macOS) i „Klucze API” w menu. Menu aplikacji: Klucze API…, Pokaż dane w Finderze.
+- Strony docsów: [Desktop](/components/desktop/), [Desktop API](/api/desktop/), [UI](/components/ui/), [CLI](/components/cli/), [Konfiguracja](/development/configuration/).
+
 ## 2026-11-28 — dom usera poza repo (`QWE_HOME`)
 
 - Rozdzielone korzenie: `REPO_ROOT` (kod) i `QWE_HOME` (dane, simy, `.env`). W repo bez zmian; spakowany Simbot.app ustawia `~/Library/Application Support/simbot`.

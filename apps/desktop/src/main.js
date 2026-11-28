@@ -10,8 +10,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createDesktopBridge, helperBinary, PRIVACY_PANES } from './desktop.js';
 import { ensureServer } from './server.js';
+import { SECRET_KEYS, createSecrets, testSecret } from './secrets.js';
 
-const ROOT = resolve(import.meta.dirname, '..', '..', '..');
+// kod runtime'u (chat, agent, pluginy, helper): w repo — korzeń repo; w Simbot.app — Resources/runtime (scripts/stage.mjs)
+const ROOT = app.isPackaged ? join(process.resourcesPath, 'runtime') : resolve(import.meta.dirname, '..', '..', '..');
+// Simbot.app z Findera/Docka dostaje PATH=/usr/bin:/bin — serwery MCP (node, npx, uvx) i helpery z Homebrew by zniknęły
+if (app.isPackaged) process.env.PATH = [...new Set(['/opt/homebrew/bin', '/usr/local/bin', ...(process.env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin').split(':')])].join(':');
 const ASSETS = resolve(import.meta.dirname, '..', 'assets');
 const PRELOAD = resolve(import.meta.dirname, 'preload.cjs');
 const MOCK = process.argv.includes('--mock') || process.env.QWE_MOCK === '1';
@@ -52,6 +56,9 @@ let tray = null;
 let quitting = false;
 let currentSession = null;
 let desktop = null; // most do qwe-helper (sterowanie całym komputerem)
+let secrets = null; // klucze API z pęku kluczy (secrets.js)
+/** Klucze, które były w środowisku przy starcie (shell) — po usunięciu klucza w aplikacji wracamy do nich, a nie do pustego. */
+const BOOT_KEYS = Object.fromEntries(Object.keys(SECRET_KEYS).map(k => [k, process.env[k]]));
 let perms = { screen: null, accessibility: null };
 let agentState = 'idle'; // idle | working | waiting | error — zbiorczo ze wszystkich rozmów (lobby)
 
@@ -287,6 +294,9 @@ function settingsMenu() {
     { type: 'separator' },
     { label: 'Komputer: ekran agenta', submenu: displayMenu() },
     { label: `Komputer: uprawnienia${perms.screen && perms.accessibility ? ' ✓' : ' — wymagane'}`, submenu: permissionsMenu() },
+    { type: 'separator' },
+    { label: 'Klucze API…', click: () => { showMain(); mainWin.webContents.send('qwe:keys'); } },
+    { label: 'Pokaż dane w Finderze', click: () => shell.openPath(HOME) },
   ];
 }
 function buildTrayMenu() {
@@ -328,6 +338,45 @@ function attention(id) {
 }
 
 /** Lobby WS: zbiorczy stan rozmów → tray, przejścia w „czeka na Ciebie” → widget. */
+// ───────── klucze API ─────────
+/** Klucze z aplikacji → env procesu (chat i agent dziedziczą przy starcie). Usunięty w aplikacji → wraca to, co było w shellu. */
+async function applySecrets() {
+  const mine = (await secrets?.load()) ?? {};
+  for (const k of Object.keys(SECRET_KEYS)) {
+    if (mine[k]) process.env[k] = mine[k];
+    else if (BOOT_KEYS[k] === undefined) delete process.env[k];
+    else process.env[k] = BOOT_KEYS[k];
+  }
+}
+/** Nowe klucze wymagają nowego procesu chatu (env czytany przy starcie). Podpięty pod `qwe dev` → nie restartujemy cudzego procesu. */
+async function restartServer() {
+  if (!server || server.attached) return { restarted: false, reason: 'chat działa osobno (qwe dev) — uruchom go ponownie, żeby wziął nowe klucze' };
+  server.stopped = true;
+  await server.stop();
+  await applySecrets();
+  server = await ensureServer({ root: ROOT, host: HOST, port: PORT, mock: MOCK, packaged: app.isPackaged, log });
+  mainWin?.webContents.reload();
+  widget?.webContents.reload();
+  return { restarted: true };
+}
+const keyStatus = () => secrets.status({ ...dotenv(), ...BOOT_KEYS });
+const fromMain = e => e.sender === mainWin?.webContents;
+ipcMain.handle('secrets:status', async e => (fromMain(e) ? { keys: await keyStatus(), available: await secrets.available(), home: HOME } : null));
+ipcMain.handle('secrets:test', (e, { name, value } = {}) => (fromMain(e) ? testSecret(name, value) : null));
+ipcMain.handle('secrets:set', async (e, { values = {}, restart = true } = {}) => {
+  if (!fromMain(e)) return null;
+  for (const [name, value] of Object.entries(values)) await secrets.set(name, value);
+  const r = restart ? await restartServer() : { restarted: false };
+  return { ...r, keys: await keyStatus() };
+});
+ipcMain.handle('perms:status', async e => { if (!fromMain(e)) return null; await refreshPerms(); return { ...perms, helper: !!desktop }; });
+ipcMain.handle('perms:request', async (e, kind) => {
+  if (!fromMain(e) || !(kind in PRIVACY_PANES)) return null;
+  await desktop?.call('request', { kind }).catch(() => {});
+  shell.openExternal(PRIVACY_PANES[kind]);
+  return true;
+});
+
 function watchLobby() {
   const states = new Map();
   const sum = () => { const v = [...states.values()]; setTray(v.includes('waiting_user') ? 'waiting' : v.includes('working') ? 'working' : 'idle'); };
@@ -407,7 +456,8 @@ app.on('will-quit', async e => {
     e.preventDefault();
     server.stopped = true;
     await server.stop();
-    app.quit();
+    // drugi app.quit() z wnętrza will-quit Electron 45 ignoruje (proces wisiał po zamknięciu chatu) — sprzątanie zrobione, wychodzimy
+    app.exit(0);
   }
 });
 
@@ -420,8 +470,12 @@ app.whenReady().then(async () => {
   await desktop.listen();
   refreshPerms();
   setInterval(refreshPerms, 15000);
+  // klucze z pęku kluczy → env, ZANIM wstanie chat (chat → agent dziedziczą)
+  // zawsze w userData (~/Library/Application Support/simbot), także w trybie dev — nigdy w repo; i tak da się je odczytać tylko na tym Macu
+  secrets = createSecrets({ home: app.getPath('userData'), log });
+  await applySecrets();
   try {
-    server = await ensureServer({ root: ROOT, host: HOST, port: PORT, mock: MOCK, log });
+    server = await ensureServer({ root: ROOT, host: HOST, port: PORT, mock: MOCK, packaged: app.isPackaged, log });
   } catch (e) {
     dialog.showErrorBox('simbot nie wystartował', e.message);
     app.exit(1);

@@ -12,6 +12,7 @@ import { cfgOf } from './builder.js';
 import { attachMentions } from './mentions.js';
 import { newSimDialog, renderSimPage } from './sims.js';
 import { profileDialog, renderEmpty, renderWorkflowsPage, workflowEditor } from './pages.js';
+import { keysDialog, needsWelcome } from './welcome.js';
 import { renderMcpPage } from './mcp.js';
 import { icon } from './icons.js';
 import { initModels, modelCaps } from './models.js';
@@ -297,11 +298,12 @@ function renderDd() {
   $('ddDel').onclick = async () => { $('dd').hidden = true; if (!(await confirmBox('Usunąć rozmowę?', 'Historia i karty zadań znikną. Simy i ich pamięć zostają.'))) return; await api.del(`/api/sessions/${app.current}`); app.current = null; await loadSessions(); pickFirstOrEmpty(); };
 }
 function renderMeMenu() {
-  $('meMenu').innerHTML = `<button id="mmProfile">${icon('user')}Profil: imię i awatar</button><button id="mmWf">${icon('workflow')}Workflowy</button><button id="mmMcp">${icon('plug')}Serwery MCP</button><button id="mmSim">${icon('user-plus')}Dodaj sima</button><hr/><a href="${esc(app.config.agent.url)}/dashboard/" target="_blank" rel="noopener">${icon('activity')}Dashboard agenta<span class="sp"></span>${icon('external-link', 14)}</a><button id="mmTheme">${icon(theme.get() === 'dark' ? 'sun' : 'moon')}Motyw: ${theme.get() === 'dark' ? 'ciemny' : 'jasny'}</button>`;
+  $('meMenu').innerHTML = `<button id="mmProfile">${icon('user')}Profil: imię i awatar</button><button id="mmWf">${icon('workflow')}Workflowy</button><button id="mmMcp">${icon('plug')}Serwery MCP</button><button id="mmSim">${icon('user-plus')}Dodaj sima</button>${window.qwe?.secrets ? `<button id="mmKeys">${icon('key')}Klucze API</button>` : ''}<hr/><a href="${esc(app.config.agent.url)}/dashboard/" target="_blank" rel="noopener">${icon('activity')}Dashboard agenta<span class="sp"></span>${icon('external-link', 14)}</a><button id="mmTheme">${icon(theme.get() === 'dark' ? 'sun' : 'moon')}Motyw: ${theme.get() === 'dark' ? 'ciemny' : 'jasny'}</button>`;
   $('mmProfile').onclick = async () => { $('meMenu').hidden = true; if (await profileDialog(app)) { renderMe(); if (app.page === 'chat' && app.current) openSession(app.current); } };
   $('mmWf').onclick = () => { $('meMenu').hidden = true; showPage('workflows'); if (!isDesktop()) nav.set(false); };
   $('mmMcp').onclick = () => { $('meMenu').hidden = true; showPage('mcp'); if (!isDesktop()) nav.set(false); };
   $('mmSim').onclick = () => { $('meMenu').hidden = true; app.addSim(); };
+  if ($('mmKeys')) $('mmKeys').onclick = () => { $('meMenu').hidden = true; keysDialog(app); };
   $('mmTheme').onclick = () => { theme.apply(theme.get() === 'dark' ? 'light' : 'dark'); syncTheme(); renderMeMenu(); };
 }
 
@@ -700,6 +702,7 @@ if (shell) {
   $('widgetBtn').onclick = () => shell.toggleWidget();
   shell.on('qwe:widget-visible', on => $('widgetBtn').setAttribute('aria-checked', on ? 'true' : 'false'));
   shell.on('qwe:new', () => $('newBtn').click());
+  shell.on('qwe:keys', () => keysDialog(app));
   shell.on('qwe:find', () => { if (!nav.open) nav.set(true); $('searchWrap').hidden = false; $('search').focus(); });
   // handoff z widgetu: dokładnie ta rozmowa i to zadanie (panel komputera otwarty na nim), nie strona główna
   shell.on('qwe:open-session', async ({ sessionId, taskId } = {}) => {
@@ -716,6 +719,8 @@ if (shell) {
   await app.loadConfig();
   agentLamp(app.config.agent.status === 'up' ? '[agent] online' : '[agent] zakończony');
   openLobby();
+  // Simbot.app bez modelu: klucz Anthropic (pęk kluczy) + zgody macOS; zapis restartuje chat i przeładowuje stronę
+  if (needsWelcome(app)) await keysDialog(app, { mode: 'welcome' });
   if (!app.config.me.name) { await profileDialog(app, { locked: true }); renderMe(); }
   await loadSessions();
   const wanted = location.hash.slice(1);

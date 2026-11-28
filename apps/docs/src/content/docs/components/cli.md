@@ -19,6 +19,9 @@ sources:
 | `qwe chat` / `qwe agent [--mock]` | Pojedynczy proces. |
 | `qwe desktop [--mock]` | Electron: okno + widget + tray. |
 | `qwe inspect [agentDir]` | Co widzi manifest: capability, tools, skille, zależności. |
+| `qwe home` | Gdzie jest dom usera teraz i dom Simbot.app. |
+| `qwe home import [--to DIR] [--force]` | Kopiuje `data/`, `agents/` i `.env` z repo do domu Simbot.app; serwerom MCP bez `cwd` dopisuje `cwd` = repo. |
+| `pnpm app` / `pnpm app:dmg` | Simbot.app / `.dmg` — zob. [Desktop → Simbot.app](/components/desktop/#simbotapp-build). |
 | `qwe build [agentDir] [--tag T] [--dry-run]` | Dockerfile z `AgentManifest.yaml` + pluginów → `docker build`. |
 | `qwe build --runtime [--tag T]` | Obraz bazowy `qwe/agent-runtime:0.1.0` (monorepo + Chromium). |
 | `qwe run [agentDir\|image] [--name N] [--port P] [--no-chat]` | Agent w kontenerze + chat na hoście (`QWE_AGENT_MODE=url`). |
